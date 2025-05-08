@@ -24,15 +24,15 @@ function newSkeleton = multiAnimalSkeleton(baseSkeleton, nAnimals)
     adjMatrixBase = repmat(baseSkeleton.joints_idx, nAnimals, 1);
     adjMatrixModifier = (repelem(repmat((1:nAnimals)', 1, 2), ...
         nConnections, 1) - 1) * nMarkers;
-    jointIndex = adjMatrixBase + adjMatrixModifier;
+    jointIndex = adjMatrixBase + cast(adjMatrixModifier, class(adjMatrixBase));
 
     newSkeleton.joints_idx = jointIndex;
 
     connectionColors = repmat(baseSkeleton.color, nAnimals, 1);
     newSkeleton.color = connectionColors;
 
-    uniqueColors = customColorMap(nAnimals);
-    markerColors = repelem(uniqueColors, nMarkers , 1);
-    newSkeleton.marker_colors = markerColors;
+    %uniqueColors = customColorMap(nAnimals);
+    %markerColors = repelem(uniqueColors, nMarkers , 1);
+    %newSkeleton.marker_colors = markerColors;
 end
 

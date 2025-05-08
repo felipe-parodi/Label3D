@@ -162,12 +162,14 @@ classdef Label3D < Animator
         undistortedImages = false % boolean. If true, treat images as undistorted (don't apply intrinsics to frame array)
         sync %camera sync object
         framesToLabel % frame #'s to label: [1 x nFrames] (optional)
+        cameraNames % Cell array of camera names corresponding to videos/params
         videoPositions % x, y, width, height (origin = bottom left?) of videos. SHAPE: (#cams, 4)
         defScale % global scale for images
         pctScale = 0.2 % scale images by this fraction
         DragPointColor = [1, 1, 1]; % passed to DraggableKeypoint2DAnimator constructor
         visibleDragPoints = true; %p assed to DraggableKeypoint2DAnimator constructor
         sessionDatestr % date string during load: used to set save file name
+        camPrefixMap % Map from Cam_XXX name to hardware ID prefix
 
         % ===========================
         % Useful Inherited properties
@@ -190,13 +192,13 @@ classdef Label3D < Animator
             %                TDistort - Tangential distortion
             %                r - Rotation matrix
             %                t - Translation vector
-            %    videos: Cell array of h x w x c x nFrames videos.
-            %    skeleton: Structure with three fields:
-            %        skeleton.color: nSegments x 3 matrix of RGB values
-            %        skeleton.joints_idx: nSegments x 2 matrix of integers
-            %            denoting directed edges between markers.
-            %        skeleton.joint_names: cell array of names of each joint
-            %    Syntax: Label3D(camParams, videos, skeleton, varargin);
+            %   videos: Cell array of h x w x c x nFrames videos.
+            %   skeleton: Structure with three fields:
+            %       skeleton.color: nSegments x 3 matrix of RGB values
+            %       skeleton.joints_idx: nSegments x 2 matrix of integers
+            %           denoting directed edges between markers.
+            %       skeleton.joint_names: cell array of names of each joint
+            %   Syntax: Label3D(camParams, videos, skeleton, varargin);
             %
             % Input format 2: Load from state
             %    file: Path to saved Label3D state file (with or without
@@ -269,7 +271,71 @@ classdef Label3D < Animator
                 set(obj, varargin{:})
             end
             
-            % Set up Animator parameters
+            % --- Handle Optional Inputs (Build clean list for set) ---
+            obj.camPrefixMap = containers.Map('KeyType', 'char', 'ValueType', 'char'); % Initialize empty
+            argsForSet = {}; % Cell array for arguments to pass to set()
+            processedMap = false; % Flag to ensure we only process it once
+            
+            i = 1;
+            while i <= numel(varargin)
+                if (ischar(varargin{i}) || isstring(varargin{i})) && i+1 <= numel(varargin)
+                    paramName = varargin{i};
+                    paramValue = varargin{i+1};
+                    
+                    if ~processedMap && strcmpi(paramName, 'camPrefixMap')
+                        % Process camPrefixMap
+                        if isa(paramValue, 'containers.Map') % Use isa() to check type
+                            obj.camPrefixMap = paramValue;
+                            fprintf('DEBUG buildFromScratch: Successfully processed camPrefixMap.\n');
+                        else
+                            warning('Label3D:buildFromScratch', 'Optional input ''camPrefixMap'' ignored: value is not a containers.Map.'); % Doubled single quotes
+                        end
+                        processedMap = true; % Mark as processed
+                        % DO NOT add to argsForSet
+                    else
+                        % Add other valid key-value pairs to argsForSet
+                        argsForSet{end+1} = paramName;
+                        argsForSet{end+1} = paramValue;
+                    end
+                    i = i + 2; % Move past key and value
+                else
+                    % Handle potential malformed varargin or single trailing argument
+                    warning('Label3D:buildFromScratch', 'Skipping unexpected or incomplete input argument near index %d', i);
+                    i = i + 1;
+                end
+            end
+            
+            % --- Debugging before set ---
+            fprintf('DEBUG: Size of argsForSet before set: %d\n', numel(argsForSet));
+            if ~isempty(argsForSet)
+                 fprintf('DEBUG: Contents of argsForSet before set:\n');
+                 disp(argsForSet);
+            else
+                 fprintf('DEBUG: argsForSet is empty before set.\n');
+            end
+            % --- End Debugging ---
+
+            % Apply the filtered arguments using set
+            if ~isempty(argsForSet)
+                 if mod(numel(argsForSet), 2) ~= 0
+                     warning('Label3D:buildFromScratch', 'argsForSet has odd number of elements. Skipping set().');
+                     disp(argsForSet); % Display the problematic array
+                 else
+                     try
+                        set(obj, argsForSet{:});
+                        fprintf('DEBUG buildFromScratch: set(obj, argsForSet{:}) executed successfully.\n');
+                     catch ME_set
+                         fprintf('ERROR during set(obj, argsForSet{:}):\n');
+                         disp(argsForSet); % Display args that caused error
+                         rethrow(ME_set);
+                     end
+                 end
+            else
+                 fprintf('DEBUG buildFromScratch: No arguments remaining for set().\n');
+            end
+            % --- End Handle Optional Inputs ---
+             
+             % Set up Animator parameters
             obj.origCamParams = camParams;
             obj.nFrames = size(videos{1}, 4);
             obj.origNFrames = obj.nFrames;
@@ -302,6 +368,71 @@ classdef Label3D < Animator
                 set(obj.h{nCam}.img, 'ButtonDownFcn', @obj.clickImage);
             end
             
+            % --- Add Camera Name Overlay & Principal Point ---
+            if ~isempty(obj.cameraNames) && numel(obj.cameraNames) == obj.nCams
+                for nCam = 1 : obj.nCams
+                    ax = obj.h{nCam}.Axes;
+                    hold(ax, 'on'); % Ensure we are adding to the plot
+
+                    % Add Camera Name Text
+                    camName = obj.cameraNames{nCam};
+                    text(ax, 0.98, 0.95, strrep(camName, '_', ' '), ... 
+                        'Units', 'normalized', ...
+                        'Color', 'white', ...
+                        'BackgroundColor', [0 0 0 0.5], ... % Semi-transparent black background
+                        'Margin', 2, ...
+                        'HorizontalAlignment', 'right', ...
+                        'VerticalAlignment', 'top', ...
+                        'FontSize', 10, ...
+                        'FontWeight', 'bold');
+
+                    % --- Add Hardware ID Text (below Cam Name) ---
+                    if ~isempty(obj.camPrefixMap) && isKey(obj.camPrefixMap, camName)
+                        prefix = obj.camPrefixMap(camName);
+                        text(ax, 0.98, 0.90, prefix, ... % Adjust Y position (e.g., 0.90)
+                             'Units', 'normalized', ...
+                             'Color', 'cyan', ... % Use a different color for distinction
+                             'BackgroundColor', [0 0 0 0.5], ...
+                             'Margin', 2, ...
+                             'HorizontalAlignment', 'right', ...
+                             'VerticalAlignment', 'top', ...
+                             'FontSize', 8, ... % Slightly smaller font
+                             'FontWeight', 'normal');
+                    else
+                        % Optional: print warning if map exists but key is missing
+                        if ~isempty(obj.camPrefixMap)
+                            warning('Prefix not found in camPrefixMap for: %s', camName);
+                        end
+                    end
+                    % --------------------------------------------
+
+                    % Add Principal Point Marker
+                    try
+                        camParam = obj.cameraParams{nCam};
+                        % The cameraParameters object holds the K matrix in the 
+                        % non-standard format it was given: [[fx,0,0],[0,fy,0],[cx,cy,1]]
+                        K_nonstandard = camParam.Intrinsics.IntrinsicMatrix; 
+                        % Extract cx, cy from the correct locations for this format
+                        cx = K_nonstandard(3, 1);
+                        cy = K_nonstandard(3, 2);
+                        % Plot the marker
+                        plot(ax, cx, cy, 'r*', 'MarkerSize', 8, 'LineWidth', 1.5); 
+                        % Add text label with coordinates
+                        text(ax, cx + 10, cy + 10, sprintf('(%.1f, %.1f)', cx, cy), ...
+                             'Color', 'red', ...
+                             'FontSize', 8, ...
+                             'Clipping', 'on'); % Clip text if it goes off axes
+                    catch ME_pp
+                        warning('Could not plot principal point for %s: %s', camName, ME_pp.message);
+                    end
+
+                    hold(ax, 'off'); % Release hold
+                end
+            else
+                warning('Camera names not provided or mismatch count; skipping overlay.');
+            end
+            % --- End Overlay Section ---
+
             % If there are no initialized markers, set the markers to nan.
             % Othewise, save them in initialMarkers.
             if isempty(obj.markers)
@@ -364,12 +495,24 @@ classdef Label3D < Animator
             % Set up the keypoint table figure
             obj.setUpKeypointTable();
             
+            % --- Disable Default Data Cursor Mode and Limit Interactions (like original) --- 
+            % Remove the explicit disabling of datacursormode, as disableDefaultInteractivity handles it.
+            % dcm_obj = datacursormode(obj.Parent); 
+            % set(dcm_obj, 'Enable', 'off');
+
             % Limit the default interactivity to useful interactions
             for nAx = 1 : numel(obj.Parent.Children)
                 ax = obj.Parent.Children(nAx);
-                disableDefaultInteractivity(ax);
-                ax.Interactions = [zoomInteraction, regionZoomInteraction, rulerPanInteraction];
+                try % Wrap in try-catch in case some children are not axes
+                    disableDefaultInteractivity(ax);
+                    % Only enable zoom and pan - Data cursor should remain disabled
+                    ax.Interactions = [zoomInteraction, regionZoomInteraction, rulerPanInteraction]; 
+                catch ME_interact
+                    % Ignore errors for non-axes children
+                    % fprintf('Skipping interaction setting for child %d: %s\n', nAx, ME_interact.message); 
+                end
             end
+            % --- End Interaction Limiting --- 
         end
         
         function pos = positionFromNRows(obj, views, nRows)
@@ -465,7 +608,7 @@ classdef Label3D < Animator
             end
         end
         
-        function [c, orientations, locations] = loadcamParams(obj, camParams)
+        function [c, orientations, locations] = loadcamParams(obj, camParams) % Restore original input name
             % LOADCAMPARAMS - Helper to load in camera params into cameraParameters objects
             %  and save the world positions.
             %
@@ -476,24 +619,25 @@ classdef Label3D < Animator
             % See also: GETCAMERAPOSES
             [c, orientations, locations] = deal(cell(obj.nCams, 1));
             for i = 1 : numel(c)
-                % Get all parameters into cameraParameters object.
+                % Original logic: Get parameters into cameraParameters object.
                 K = camParams{i}.K;
                 RDistort = camParams{i}.RDistort;
                 TDistort = camParams{i}.TDistort;
-                R = camParams{i}.r;
+                R = camParams{i}.r; % Assumed R_w_c in original? Let's stick to original logic flow.
                 rotationVector = rotationMatrixToVector(R);
-                translationVector = camParams{i}.t;
-                c{i} = cameraParameters( ...
-                    'IntrinsicMatrix', K, ...
+                translationVector = camParams{i}.t; % Assumed T_c_w in original?
+
+                c{i} = cameraParameters( ... 
+                    'IntrinsicMatrix', K, ... % REMOVED TRANSPOSE to match original_label3d.m
                     'ImageSize', obj.ImageSize(i, :), ...
                     'RadialDistortion', RDistort, ...
                     'TangentialDistortion', TDistort, ...
-                    'RotationVectors', rotationVector, ...
-                    'TranslationVectors', translationVector);
-                
-                % Also save world location and orientation
-                orientations{i} = R';
-                locations{i} = -translationVector * orientations{i};
+                    'RotationVectors', rotationVector, ... % Use R directly converted
+                    'TranslationVectors', translationVector); % Use t directly
+
+                % Original logic for orientations and locations:
+                orientations{i} = R'; % Store R' = R_w_c' = R_c_w (Matches original)
+                locations{i} = -translationVector * orientations{i}; % Store T_w_c = -T_c_w * R_c_w (Matches original)
             end
         end
         
@@ -648,18 +792,98 @@ classdef Label3D < Animator
             [camIds, jointIds] = obj.getLabeledJoints(frame);
             
             % For each labeled joint, triangulate with the right cameras
-            xyzPoints = zeros(numel(jointIds), 3);
+            % xyzPoints = zeros(numel(jointIds), 3); % Remove preallocation
             for nJoint = 1 : numel(jointIds)
-                cams = camIds(nJoint, :);
+                camsLogicalRow = camIds(nJoint, :);
                 joint = jointIds(nJoint);
-                pointTracks = obj.getPointTrack(frame, joint, cams);
-                xyzPoints(nJoint, :) = triangulateMultiview(pointTracks, ...
-                    obj.cameraPoses(cams, :), intrinsics(cams));
-            end
+                pointTracks = obj.getPointTrack(frame, joint, camsLogicalRow); % Gets undistorted points
+
+                cameraIndicesUsed = find(camsLogicalRow); % Store indices
+                
+                % --- START NEW LOGGING --- 
+                fprintf('--- Inputs to triangulateMultiview for Joint %d ---\n', joint);
+                fprintf('  Undistorted 2D Points (pointTracks.Points):\n');
+                disp(pointTracks.Points);
+                
+                % fprintf('  Camera Indices Used: %s\n', mat2str(find(camsLogicalRow)));
+                fprintf('  Camera Indices Used: %s\n', mat2str(cameraIndicesUsed)); % Use stored indices
+                
+                % --- Add check for empty indices --- 
+                if isempty(cameraIndicesUsed)
+                    fprintf('  WARNING: No valid camera indices found for joint %d in this frame. Skipping triangulation.\n', joint);
+                    continue; % Skip to the next joint
+                end
+                % --- End check ---
+                
+                % Extract and display the exact poses being used from obj.cameraPoses
+                % poses_to_use = obj.cameraPoses(find(camsLogicalRow),:);
+                poses_to_use = obj.cameraPoses(cameraIndicesUsed,:); % Use stored indices
+                fprintf('  Poses Passed (from obj.cameraPoses):\n');
+                disp(poses_to_use); % Display the relevant rows of the table
+                
+                % Extract and display intrinsics used
+                % intrinsics_to_use = intrinsics(find(camsLogicalRow));
+                intrinsics_to_use = intrinsics(cameraIndicesUsed); % Use stored indices
+                fprintf('  Intrinsics Passed:\n');
+                for intr_idx = 1:numel(intrinsics_to_use)
+                   % fprintf('  Camera %d Intrinsics:\n', find(camsLogicalRow)(intr_idx));
+                   fprintf('  Camera %d Intrinsics:\n', cameraIndicesUsed(intr_idx)); % Use stored indices
+                   disp(intrinsics_to_use(intr_idx)); % Display the cameraIntrinsics object
+                end
+                % --- END NEW LOGGING ---
+
+                % The actual triangulation call
+                 % obj.cameraPoses(find(camsLogicalRow), :), intrinsics(find(camsLogicalRow)));
+                 % Store the single result directly
+                 % current_xyzPoint = triangulateMultiview(pointTracks, poses_to_use, intrinsics_to_use); 
+                 
+                 % --- Call triangulateMultiview within try-catch ---
+                 current_xyzPoint = []; % Initialize to empty
+                 triangulation_successful = false; 
+                 try
+                     fprintf('Attempting triangulation for joint %d...\n', joint); % Log before call
+                     current_xyzPoint = triangulateMultiview(pointTracks, poses_to_use, intrinsics_to_use);
+                     triangulation_successful = true;
+                     fprintf('Triangulation call completed for joint %d.\n', joint); % Log after call
+                 catch ME
+                     fprintf('!!! ERROR during triangulateMultiview call for joint %d !!!\n', joint);
+                     fprintf('Error Identifier: %s\n', ME.identifier);
+                     fprintf('Error Message: %s\n', ME.message);
+                     % Optionally display stack trace
+                     % disp(ME.stack); 
+                     current_xyzPoint = [NaN, NaN, NaN]; % Assign NaN on error
+                 end
+
+                % --- START Log Output / Result Inspection ---
+                % fprintf('  Output 3D Point for Joint %d: ', joint);
+                % % disp(xyzPoints(nJoint, :));
+                % disp(current_xyzPoint);
+                fprintf('  Result Inspection for Joint %d:\n', joint);
+                fprintf('    Success Flag: %d\n', triangulation_successful);
+                fprintf('    Output Type: %s\n', class(current_xyzPoint));
+                fprintf('    Output Size: %s\n', mat2str(size(current_xyzPoint)));
+                fprintf('    Output Value (current_xyzPoint): ');
+                disp(current_xyzPoint); % Display the result
+                fprintf('----------------------------------------------------');
+                % --- END Log Output ---
+                
+                % --- Assign result inside the loop --- 
+                % obj.points3D(joint, :, frame) = current_xyzPoint;
+                if triangulation_successful && isnumeric(current_xyzPoint) && isequal(size(current_xyzPoint), [1, 3]) && ~any(isnan(current_xyzPoint)) && ~any(isinf(current_xyzPoint))
+                    fprintf('    Assigning valid result to obj.points3D(%d, :, %d)\n', joint, frame);
+                    obj.points3D(joint, :, frame) = current_xyzPoint;
+                else
+                    fprintf('    Skipping assignment due to error or invalid result.\n');
+                    % Optionally assign NaN if needed, or leave as is
+                    % obj.points3D(joint, :, frame) = [NaN, NaN, NaN]; 
+                end
+                fprintf('----------------------------------------------------');
+
+            end % End of nJoint loop
             
             % Save the results to the points3D matrix
-            obj.points3D(jointIds, :, frame) = xyzPoints;
-        end
+            % obj.points3D(jointIds, :, frame) = xyzPoints; % Remove assignment outside the loop (THIS LINE WAS THE PROBLEM)
+        end % THIS end closes the triangulateLabeledPoints function
         
         function reprojectPoints(obj, frame)
             % Find the labeled joints and corresponding cameras
@@ -669,19 +893,43 @@ classdef Label3D < Animator
             % each camera and store in the camPoints
             for nCam = 1 : obj.nCams
                 camParam = obj.cameraParams{nCam};
-                rotation = obj.orientations{nCam}';
-                translation = camParam.TranslationVectors;
+                % Original logic for rotation and translation:
+                rotation = obj.orientations{nCam}'; % R_c_w' = R_w_c
+                translation = camParam.TranslationVectors; % T_c_w (as stored in cameraParams)
                 worldPoints = obj.points3D(jointIds, :, frame);
                 if ~isempty(worldPoints)
                     if obj.undistortedImages
-                        obj.camPoints(jointIds, nCam, :, frame) = ...
+                        % THE ACTUAL REPROJECTION
+                        projectedImagePoints = ...
                             worldToImage(camParam, rotation, translation, ...
                             worldPoints);
                     else
-                        obj.camPoints(jointIds, nCam, :, frame) = ...
+                        projectedImagePoints = ...
                             worldToImage(camParam, rotation, translation, ...
                             worldPoints, 'ApplyDistortion', true);
                     end
+                    obj.camPoints(jointIds, nCam, :, frame) = projectedImagePoints; % Storing the reprojected points
+
+                    % --- BEGIN ADDED PRINT STATEMENTS ---
+                    if ~isempty(projectedImagePoints)
+                        fprintf('--- Reprojection Details for Frame %d, Camera %d ---\\n', frame, nCam); % Ensure this main title has a newline
+                        for jIdx = 1:numel(jointIds)
+                            currentJointId = jointIds(jIdx);
+                            % Ensure we only try to access valid rows in worldPoints and projectedImagePoints
+                            if jIdx <= size(worldPoints, 1) && jIdx <= size(projectedImagePoints, 1)
+                                fprintf('  Joint ID: %d\\n', currentJointId); % Added newline
+                                fprintf('    Input 3D Point (worldPoints(%d, :)): [%.4f, %.4f, %.4f]\\n', ...
+                                    jIdx, worldPoints(jIdx, 1), worldPoints(jIdx, 2), worldPoints(jIdx, 3)); % Added newline
+                                fprintf('    Output 2D Reprojected Point (projectedImagePoints(%d, :)): [%.4f, %.4f]\\n', ...
+                                    jIdx, projectedImagePoints(jIdx, 1), projectedImagePoints(jIdx, 2)); % Added newline
+                            else
+                                fprintf('    Skipping print for joint index %d due to inconsistent sizes (worldPoints: %d, projected: %d rows)\\n', ...
+                                    jIdx, size(worldPoints,1), size(projectedImagePoints,1)); % Added newline
+                            end
+                        end
+                        fprintf('----------------------------------------------------\\n'); % Ensure this footer has a newline
+                    end
+                    % --- END ADDED PRINT STATEMENTS ---
                 end
             end
         end
@@ -879,9 +1127,45 @@ classdef Label3D < Animator
                         obj.update()
                         obj.forceTriangulateLabeledPoints(camInFocus, marker)
                     else
-                        obj.triangulateLabeledPoints(obj.frameInds(obj.frame));
+                        % --- START MODIFICATION ---
+                        fr = obj.frameInds(obj.frame);
+                        % 1. Get labeled joints/cameras and store original points
+                        [camIdsLogical, jointIds] = obj.getLabeledJoints(fr);
+                        originalPoints = struct('jointId', {}, 'camIdx', {}, 'coords', {});
+                        pointCounter = 1;
+                        for j_idx = 1:numel(jointIds)
+                            currentJointId = jointIds(j_idx);
+                            % Find camera indices for this joint (logical row from camIdsLogical)
+                            labeledCamIndicesForJoint = find(camIdsLogical(j_idx, :)); 
+                            for c_idx = 1:numel(labeledCamIndicesForJoint)
+                                currentCamIdx = labeledCamIndicesForJoint(c_idx);
+                                originalPoints(pointCounter).jointId = currentJointId;
+                                originalPoints(pointCounter).camIdx = currentCamIdx;
+                                % Read coords directly before they get overwritten
+                                originalPoints(pointCounter).coords = squeeze(obj.camPoints(currentJointId, currentCamIdx, :, fr));
+                                pointCounter = pointCounter + 1;
+                            end
+                        end
+
+                        % 2. Perform triangulation (updates obj.points3D)
+                        obj.triangulateLabeledPoints(fr);
+                        
+                        % 3. Reproject points (updates obj.camPoints for ALL cams)
+                        obj.reprojectPoints(fr);
+
+                        % 4. Restore original points for the views used in triangulation
+                        for i = 1:numel(originalPoints)
+                            jId = originalPoints(i).jointId;
+                            cId = originalPoints(i).camIdx;
+                            origCoords = originalPoints(i).coords;
+                            % Check if coords are valid before writing back
+                            if ~any(isnan(origCoords))
+                                obj.camPoints(jId, cId, :, fr) = origCoords;
+                            end
+                        end
+                        % --- END MODIFICATION ---
                     end
-                    obj.reprojectPoints(obj.frameInds(obj.frame));
+                    % Original call to update display remains here
                     update(obj)
                     if obj.autosave
                         obj.saveState()
@@ -1493,7 +1777,6 @@ classdef Label3D < Animator
                 obj.loadAll(files, varargin{:});
             end
         end
-        
     end
     
     methods (Access = protected)

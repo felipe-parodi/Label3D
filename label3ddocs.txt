@@ -1,0 +1,403 @@
+Skip to content
+Navigation Menu
+diegoaldarondo
+Label3D
+
+Type / to search
+Code
+Issues
+11
+Pull requests
+Actions
+Projects
+Wiki
+Security
+Insights
+Documentation
+Diego Aldarondo edited this page on Aug 24, 2020 · 2 revisions
+Quick links
+Animator
+
+checkVisible
+delete
+getAxes
+getFrameInds
+linkAll
+restrict
+runAll
+tileAnimators
+writeVideo
+Label3D
+
+Label3D
+add3dPlot
+buildFromScratch
+checkForClickedNodes
+checkStatus
+clickImage
+exportDannce
+forceTriangulateLabeledPoints
+getAnimators
+getCameraPoses
+getLabeledJoints
+getPointTrack
+getPositions
+keyPressCallback
+loadFrom3D
+loadState
+loadcamParams
+plotCameras
+positionFromNRows
+remove3dPlot
+reprojectPoints
+resetAspectRatio
+resetFrame
+saveAll
+saveState
+selectNode
+setFrame
+setLabeled
+togglePan
+toggleUiState
+toggleZoomIn
+triangulateLabeledPoints
+triangulateView
+zoomOut
+View3D
+
+View3D
+getAnimators
+saveState
+Docstrings
+Animator.checkVisible(obj)
+Animator/checkVisible is a function.
+    checkVisible(obj)
+Animator.delete(obj)
+  Delete the axes if the chart is destroyed.
+
+Help for Animator/delete is inherited from superclass FLEXCHART
+axes = Animator.getAxes(obj)
+Animator/getAxes is a function.
+    axes = getAxes(obj)
+frameInds = Animator.getFrameInds(obj)
+Animator/getFrameInds is a function.
+    frameInds = getFrameInds(obj)
+Animator.linkAll(h)
+Animator.linkAll is a function.
+    linkAll(h)
+Animator.restrict(obj, newFrames)
+Animator/restrict is a function.
+    restrict(obj, newFrames)
+Animator.runAll(h, src, event)
+ runAll - iterate through the keyPressCallback function of all
+ Animators within a cell array.
+ 
+    Syntax: runAll(h,src,event);
+ 
+    Notes: It is useful to assign this function as the
+           WindowKeyPressFcn of a figure with multiple axes
+           that listen for key presses.
+Animator.tileAnimators(h, varargin)
+Animator.tileAnimators is a function.
+    tileAnimators(h, varargin)
+V = Animator.writeVideo(obj, frameIds, savePath, varargin)
+ writeMovie - write an Animator movie
+ 
+    Syntax: Animator.writeMovie(frameIds,savePath,'FPS',30);
+ 
+    Inputs: frameIds - frames to write
+            savePath - path to save movie
+            varargin - arguments to write_frames.m.
+ 
+    Notes: The writing function for .avi is different than the
+    one for .gifs. Be sure to use the correct varargs E.g.
+    "DelayTime" for gifs, "FPS" for avi.
+ 
+    Required .m files: write_frames.m
+obj = Label3D.Label3D(varargin)
+ Label3D - constructor for Label3D class.
+ 
+ Input format 1: Build from scratch
+    camParams: Cell array of structures denoting camera
+               parameters for each camera.
+            Structure has five fields:
+                K - Intrinsic Matrix
+                RDistort - Radial distortion
+                TDistort - Tangential distortion
+                r - Rotation matrix
+                t - Translation vector
+    videos: Cell array of h x w x c x nFrames videos.
+    skeleton: Structure with three fields:
+        skeleton.color: nSegments x 3 matrix of RGB values
+        skeleton.joints_idx: nSegments x 2 matrix of integers
+            denoting directed edges between markers.
+        skeleton.joint_names: cell array of names of each joint
+    Syntax: Label3D(camParams, videos, skeleton, varargin);
+ 
+ Input format 2: Load from state
+    file: Path to saved Label3D state file (with or without
+    video)
+    videos: Cell array of h x w x c x nFrames videos.
+    Syntax: Label3D(file, videos, varargin);
+ 
+ Input format 3: Load from file
+    file: Path to saved Label3D state file (with video)
+    Syntax: Label3D(file, varargin);
+ 
+ Input format 4: Load and merge multiple files
+    file: cell array of paths to saved Label3D state files (with video)
+    Syntax: Label3D(file, varargin);
+ 
+ Input format 5: Load GUI file selection
+    Syntax: Label3D(varargin);
+Label3D.add3dPlot(obj)
+  Move the other plots out of the way
+Label3D.buildFromScratch(obj, camParams, videos, skeleton, varargin)
+ buildFromScratch - Helper for Label3D constructor class.
+ 
+ Inputs:
+    camParams: Cell array of structures denoting camera
+               parameters for each camera.
+            Structure has five fields:
+                K - Intrinsic Matrix
+                RDistort - Radial distortion
+                TDistort - Tangential distortion
+                r - Rotation matrix
+                t - Translation vector
+    videos: Cell array of videos. Videos are assumed to be
+            undistorted and frame matched beforehand.
+    skeleton: Structure with two fields:
+        skeleton.color: nSegments x 3 matrix of RGB values
+        skeleton.joints_idx: nSegments x 2 matrix of integers
+            denoting directed edges between markers.
+    Syntax: Label3D.buildFromScratch(camParams, videos, skeleton, varargin);
+Label3D.checkForClickedNodes(obj)
+  Delete the selected nodes if they exist
+Label3D.checkStatus(obj)
+  Update the movement status for the current frame, if
+  necessary
+Label3D.clickImage(obj, ~, ~)
+  Callback to image clicks (but not on nodes)
+  Pull out clicked point coordinate in image coordinates
+Label3D.exportDannce(obj, varargin)
+ exportDannce - Export data to dannce format
+ 
+  Optional inputs:
+  basePath - Path to Dannce project folder
+  file - Path to .mat Label3D save file (with or without videos)
+  cameraNames - cell array of camera names (in order)
+    Default: {'Camera1', 'Camera2', etc.}
+  framesToLabel - Vector of frame numbers for each video frame.
+  Syntax: labelGui.exportDannce
+          labelGui.exportDannce('basePath', path)
+          labelGui.exportDannce('cameraNames', cameraNames)
+          labelGui.exportDannce('framesToLabel', framesToLabel)
+Label3D.forceTriangulateLabeledPoints(obj, cam1, joint)
+Label3D/forceTriangulateLabeledPoints is a function.
+    forceTriangulateLabeledPoints(obj, cam1, joint)
+animators = Label3D.getAnimators(obj)
+ GETANIMATORS - return cell array of Animators
+cameraPoses = Label3D.getCameraPoses(obj)
+ GETCAMERAPOSES -  Helper function to store the camera poses 
+ for triangulation
+ 
+ See also: LOADCAMPARAMS
+[camIds, jointIds] = Label3D.getLabeledJoints(obj, frame)
+  Look within a frame and return all joints with at least two
+  labeled views, as well as a logical vector denoting which two
+  views.
+pt = Label3D.getPointTrack(obj, frame, jointId, camIds)
+  Returns the corresponding pointTrack object for particular
+  frames, joint IDs, and cameras.
+pos = Label3D.getPositions(obj, nViews)
+ GETPOSITIONS - Get the axes positions of each camera view
+ 
+ 
+ Inputs: nViews - number of views
+ 
+ Syntax: obj.getPositions(views, nRows)
+ 
+ See also: POSITIONFROMNROWS
+Label3D.keyPressCallback(obj, source, eventdata)
+  Determine the key that was pressed
+
+Help for Label3D/keyPressCallback is inherited from superclass ANIMATOR
+Label3D.loadFrom3D(obj, pts3d)
+  loadState - Load (triangulated) 3d data and visualize.
+ 
+  Syntax: obj.loadFrom3D(files)
+ 
+  Inputs: pts3d - NFrames x 3 x nMarkers 3d data.
+Label3D.loadState(obj, varargin)
+  loadState - Load (triangulated) data from previous sessions.
+ 
+  Syntax: obj.loadState(file)
+ 
+  Optional Inputs: file - *.mat file to previous session. Output of
+  Label3D.saveState()
+ 
+  If file is not specified, calls uigetfile.
+[c, orientations, locations] = Label3D.loadcamParams(obj, camParams)
+ LOADCAMPARAMS - Helper to load in camera params into cameraParameters objects
+  and save the world positions.
+ 
+  Inputs: camParams - cell array of camera parameter structs
+ 
+  Syntax: obj.loadcamParams(camParams)
+ 
+ See also: GETCAMERAPOSES
+Label3D.plotCameras(obj)
+  Helper function to check camera positions.
+pos = Label3D.positionFromNRows(obj, views, nRows)
+ POSITIONFROMNROWS - Get the axes positions of each camera view
+ given a set number of rows
+ 
+ Inputs: views - number of views
+         nRows - number of rows
+ 
+ Syntax: obj.positionFromNRows(views, nRows)
+ 
+ See also: GETPOSITIONS
+Label3D.remove3dPlot(obj)
+Label3D/remove3dPlot is a function.
+    remove3dPlot(obj)
+Label3D.reprojectPoints(obj, frame)
+  Find the labeled joints and corresponding cameras
+Label3D.resetAspectRatio(obj)
+  aspect ratio of all images is set to 1:1
+Label3D.resetFrame(obj)
+  Reset current frame to the initial unlabeled positions.
+Label3D.saveAll(obj)
+ SAVEALL - Save the labeling session and images
+ 
+ Syntax: obj.saveAll()
+ 
+ See also: SAVESTATE, EXPORTDANNCE
+Label3D.saveState(obj)
+  saveState - Save data for each camera to the savePath
+    Saves one .mat file for each camera with the format string
+    path = sprintf('%s%sCamera_%d.mat', obj.savePath, datestr(now,'yyyy_mm_dd_HH_MM_SS'), nCam);
+ 
+  Saved variables include:
+    status - Logical denoting whether each keypoint has been
+             moved
+    skeleton - Digraph denoting animal skeleton
+    imageSize - Image dimensions
+    cameraPoses - World poses of each camera
+    data_2D - Points in image coordinates - if images were
+              distorted, the points will also be distorted.
+              If images were undistorted, the points will also
+              be undistorted.
+    data_3D - Points in world coordinates.
+  Include some metadata
+Label3D.selectNode(obj, val)
+  Update the selected node by val positions.
+Label3D.setFrame(obj, newFrame)
+  setFrame - set the frame of the GUI
+  Input:
+    newFrame: Frame number (integer)
+ 
+  The frame is set to be mod(newFrame, nFrames)
+Label3D.setLabeled(obj)
+Label3D/setLabeled is a function.
+    setLabeled(obj)
+Label3D.togglePan(obj)
+Label3D/togglePan is a function.
+    togglePan(obj)
+Label3D.toggleUiState(obj, state)
+Label3D/toggleUiState is a function.
+    toggleUiState(obj, state)
+Label3D.toggleZoomIn(obj)
+Label3D/toggleZoomIn is a function.
+    toggleZoomIn(obj)
+xyzPoints = Label3D.triangulateLabeledPoints(obj, frame)
+  Get the camera intrinsics
+Label3D.triangulateView(obj)
+ TRIANGULATEVIEW - Triangulate labeled points and zoom all
+ images around those points. 
+ 
+ Syntax: obj.triangulateView()
+ 
+ See also: ZOOMOUT
+Label3D.zoomOut(obj)
+ ZOOMOUT - Zoom all images out to their maximum sizes.
+ 
+ See also: TRIANGULATEVIEW
+obj = View3D.View3D(varargin)
+View3D/View3D is a constructor.
+animators = View3D.getAnimators(obj)
+ GETANIMATORS - return cell array of Animators
+
+Help for View3D/getAnimators is inherited from superclass LABEL3D
+View3D.saveState(obj)
+  Override superclass to do nothing
+Pages 7
+Find a page…
+Home
+About
+Documentation
+Quick links
+Docstrings
+Animator.checkVisible(obj)
+Animator.delete(obj)
+axes = Animator.getAxes(obj)
+frameInds = Animator.getFrameInds(obj)
+Animator.linkAll(h)
+Animator.restrict(obj, newFrames)
+Animator.runAll(h, src, event)
+Animator.tileAnimators(h, varargin)
+V = Animator.writeVideo(obj, frameIds, savePath, varargin)
+obj = Label3D.Label3D(varargin)
+Label3D.add3dPlot(obj)
+Label3D.buildFromScratch(obj, camParams, videos, skeleton, varargin)
+Label3D.checkForClickedNodes(obj)
+Label3D.checkStatus(obj)
+Label3D.clickImage(obj, ~, ~)
+Label3D.exportDannce(obj, varargin)
+Label3D.forceTriangulateLabeledPoints(obj, cam1, joint)
+animators = Label3D.getAnimators(obj)
+cameraPoses = Label3D.getCameraPoses(obj)
+[camIds, jointIds] = Label3D.getLabeledJoints(obj, frame)
+pt = Label3D.getPointTrack(obj, frame, jointId, camIds)
+pos = Label3D.getPositions(obj, nViews)
+Label3D.keyPressCallback(obj, source, eventdata)
+Label3D.loadFrom3D(obj, pts3d)
+Label3D.loadState(obj, varargin)
+[c, orientations, locations] = Label3D.loadcamParams(obj, camParams)
+Label3D.plotCameras(obj)
+pos = Label3D.positionFromNRows(obj, views, nRows)
+Label3D.remove3dPlot(obj)
+Label3D.reprojectPoints(obj, frame)
+Label3D.resetAspectRatio(obj)
+Label3D.resetFrame(obj)
+Label3D.saveAll(obj)
+Label3D.saveState(obj)
+Label3D.selectNode(obj, val)
+Label3D.setFrame(obj, newFrame)
+Label3D.setLabeled(obj)
+Label3D.togglePan(obj)
+Label3D.toggleUiState(obj, state)
+Label3D.toggleZoomIn(obj)
+xyzPoints = Label3D.triangulateLabeledPoints(obj, frame)
+Label3D.triangulateView(obj)
+Label3D.zoomOut(obj)
+obj = View3D.View3D(varargin)
+animators = View3D.getAnimators(obj)
+View3D.saveState(obj)
+Gestures and hotkeys
+Initializing labels
+Setup
+Viewing results
+Clone this wiki locally
+https://github.com/diegoaldarondo/Label3D.wiki.git
+Footer
+© 2025 GitHub, Inc.
+Footer navigation
+Terms
+Privacy
+Security
+Status
+Docs
+Contact
+Manage cookies
+Do not share my personal information

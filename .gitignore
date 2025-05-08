@@ -43,3 +43,8 @@ octave-workspace
 /*_Label3d.mat
 
 .DS_Store
+
+# Personal dirs
+dannce/
+label3d_params/
+labeling_output/
