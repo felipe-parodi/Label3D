@@ -1,25 +1,20 @@
 # Label3D
 
-Label3D is a GUI for the manual labeling of 3D keypoints in multiple cameras.
+Modified Label3D to include:
+- Plotting of principal point
+- Ability to swap animal IDs in view
+- 2D data loading from .mat file
+- No reprojection of labeled points
+- TODO: visibility toggle
+
+is a GUI for the manual labeling of 3D keypoints in multiple cameras.
 ![Label3D Animation](common/label3dAnimation.gif)
 
 ## Installation
 
-Label3D is dependent on other git repositories. To install dependencies recursively use:
+See Diego Aldarondo's [implementation](https://github.com/diegoaldarondo/Label3D) for full installation instructions.
 
-```
-git clone  --recurse-submodules https://github.com/diegoaldarondo/Label3D.git
-```
-
-Otherwise you can manually install dependencies.
-
-```
-git clone https://github.com/diegoaldarondo/Label3D.git
-cd Label3D/deps
-git clone https://github.com/diegoaldarondo/Animator.git
-```
-
-## Features
+## Original Features
 1. Simultaneous viewing of any number of camera views
 2. Multiview triangulation of 3D keypoints
 3. Point-and-click and draggable gestures to label keypoints
@@ -44,6 +39,6 @@ labelGui = Label3D(params, videos, skeleton);
 * [Gestures and hotkeys](https://github.com/diegoaldarondo/Label3D/wiki/Gestures-and-hotkeys)
 * [Setup](https://github.com/diegoaldarondo/Label3D/wiki/Setup)
 
-Written by Diego Aldarondo (2019)
+Original implementation by Diego Aldarondo (2019)
 
 Some code adapted from https://github.com/talmo/leap
