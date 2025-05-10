@@ -30,32 +30,33 @@ labelingCameraNames = {
     "Cam_002",
     "Cam_003",
     "Cam_004",
-    % "Cam_007",
-    % "Cam_008",
-    % "Cam_009",
-    % "Cam_010",
-    % "Cam_011",
-    % "Cam_012", 
-    % "Cam_013",
-    % "Cam_014",
-    % "Cam_015",
-    % "Cam_016",
-    % "Cam_018",
-    % "Cam_019",
-    % "Cam_020",
-    % "Cam_021",
-    % "Cam_022",
-    % "Cam_023",
-    % "Cam_024",
-    % "Cam_025",
-    % "Cam_026",
-    % "Cam_027",
-    % "Cam_028"
+    "Cam_007",
+    "Cam_008",
+    "Cam_009",
+    "Cam_010",
+    "Cam_011",
+    "Cam_012", 
+    "Cam_013",
+    "Cam_014",
+    "Cam_015",
+    "Cam_016",
+    "Cam_018",
+    "Cam_019",
+    "Cam_020",
+    "Cam_021",
+    "Cam_022",
+    "Cam_023",
+    "Cam_024",
+    "Cam_025",
+    "Cam_026",
+    "Cam_027",
+    "Cam_028"
     };
 
 % --- Define which CAMERAS (from labelingCameraNames) to load poses for ---
-camerasToLoadPosesFor = {"Cam_001", "Cam_002", 
-    % "Cam_003", "Cam_004", "Cam_007"
+camerasToLoadPosesFor = {"Cam_001", "Cam_002", ...
+    "Cam_003", ...
+    "Cam_004", "Cam_007"
     };
 numCameras = numel(labelingCameraNames);
 
@@ -85,6 +86,10 @@ nAnimals = 2;                 % Number of animals to label FOR THIS SESSION
 labelingOutputDir = fullfile(pwd, 'labeling_output'); % Folder to save Label3D sessions
 enableVideoCache = true;     % Set to true to save loaded frames for faster restarts
 useParallel = true;          % Set to true if Parallel Computing Toolbox is available
+
+% --- Debugging flags for frame selection ---
+debug_use_first_N_frames_from_poses = true; % If true and loadPrecomputedPoses, takes only the first N frames
+debug_N_frames_to_load = 5;                % Number of frames to load if debug_use_first_N_frames_from_poses is true
 
 % =========================================================================
 % --- Precomputed 2D Pose Configuration ---
@@ -288,14 +293,62 @@ if loadPrecomputedPoses
         if ~isfield(poseMatData, 'processed_frame_ids')
              error('Precomputed pose .mat file (%s) does not contain the required \'\'processed_frame_ids\'\' field.', precomputedPoseMatPath);
         end
-        framesToLabelIndices = sort(poseMatData.processed_frame_ids); % Use frame IDs from .mat file, ensure sorted
-        if isempty(framesToLabelIndices)
+        
+        all_processed_frame_ids = sort(poseMatData.processed_frame_ids); % Get all available frame IDs
+
+        if isempty(all_processed_frame_ids)
             warning('No frame IDs found in processed_frame_ids from .mat file.');
+            framesToLabelIndices = [];
             nFramesToLabel = 0;
         else
-             framesToLabelIndices = reshape(framesToLabelIndices, 1, []); 
-             nFramesToLabel = numel(framesToLabelIndices);
-             fprintf('Loaded %d frame IDs from .mat file, ranging from %d to %d.\n', nFramesToLabel, min(framesToLabelIndices), max(framesToLabelIndices));
+            fprintf('  Found %d total processed frame IDs in .mat file, ranging from %d to %d.\n', ...
+                    numel(all_processed_frame_ids), min(all_processed_frame_ids), max(all_processed_frame_ids));
+            
+            if debug_use_first_N_frames_from_poses
+                fprintf('  DEBUG: Using first %d frames from precomputed poses due to debug flag.\n', debug_N_frames_to_load);
+                unique_frames = unique(all_processed_frame_ids); % Ensure uniqueness
+                if numel(unique_frames) >= debug_N_frames_to_load
+                    framesToLabelIndices = unique_frames(1:debug_N_frames_to_load);
+                else
+                    framesToLabelIndices = unique_frames; % Take all available if fewer than N
+                    warning('  DEBUG: Requested %d frames, but only %d unique frames available.', debug_N_frames_to_load, numel(unique_frames));
+                end
+                nFramesToLabel = numel(framesToLabelIndices);
+                if ~isempty(framesToLabelIndices)
+                    fprintf('  Selected %d frames: %s\n', nFramesToLabel, mat2str(framesToLabelIndices));
+                    fprintf('  Selected frame range: %d to %d.\n', min(framesToLabelIndices), max(framesToLabelIndices));
+                else
+                    fprintf('  No frames selected based on debug settings.\n');
+                end
+            else
+                % --- Original Subsampling Logic ---
+                maxFrameToConsider = 4800;
+                samplingInterval = 3; % Take 1 every 3 frames
+
+                % 1. Filter by max frame
+                frames_below_max = all_processed_frame_ids(all_processed_frame_ids <= maxFrameToConsider);
+                
+                if isempty(frames_below_max)
+                    warning('No processed frames found at or below the max frame (%d).', maxFrameToConsider);
+                    framesToLabelIndices = [];
+                    nFramesToLabel = 0;
+                else
+                    % 2. Subsample (select 1st, 4th, 7th, etc. from the filtered list)
+                    framesToLabelIndices = frames_below_max(1:samplingInterval:end); 
+                    nFramesToLabel = numel(framesToLabelIndices);
+                    fprintf('  Selected %d frames by taking every %d frames up to frame %d.\n', ...
+                            nFramesToLabel, samplingInterval, maxFrameToConsider);
+                     if ~isempty(framesToLabelIndices)
+                          fprintf('  Selected frame range: %d to %d.\n', min(framesToLabelIndices), max(framesToLabelIndices));
+                     end
+                end
+                % --- End Original Subsampling Logic ---
+            end
+
+            % Ensure framesToLabelIndices is a row vector if not empty
+             if ~isempty(framesToLabelIndices)
+                 framesToLabelIndices = reshape(framesToLabelIndices, 1, []); 
+             end
         end
     end
 else
@@ -359,12 +412,12 @@ for i = 1:numCameras
     if ~exist(paramFile, 'file')
         error('Parameter file not found: %s. Did create_label3d_calib_mats.py run correctly?', paramFile);
     end
-    fprintf('  Loading: %s\n', paramFile);
+    % fprintf('  Loading: %s\n', paramFile);
     loadedData = load(paramFile);
-    fprintf('    Loaded %s - r matrix:\n', camName);
-    disp(loadedData.r);
-    fprintf('    Loaded %s - t vector:\n', camName);
-    disp(loadedData.t);
+    % fprintf('    Loaded %s - r matrix:\n', camName);
+    % disp(loadedData.r);
+    % fprintf('    Loaded %s - t vector:\n', camName);
+    % disp(loadedData.t);
     if ~isfield(loadedData, 'r')
        error('Field \'\'r\'\' not found in %s. Please re-run the Python script create_label3d_calib_mats.py after the latest update.', paramFile);
     end
@@ -373,16 +426,16 @@ end
 fprintf('Loaded parameters for %d cameras.\n', numel(myCamParams));
 
 % --- BEGIN LOGGING DATA PASSED TO Label3D ---
-fprintf('\n--- Verifying Data Structure Passed to Label3D ---\n');
-for i = 1:numCameras
-    camName = labelingCameraNames{i};
-    fprintf('  Camera %s (Index %d) Data:\n', camName, i);
-    fprintf('    myCamParams{%d}.r:\n', i);
-    disp(myCamParams{i}.r);
-    fprintf('    myCamParams{%d}.t:\n', i);
-    disp(myCamParams{i}.t);
-end
-fprintf('--- End Data Verification ---\n\n');
+% fprintf('\n--- Verifying Data Structure Passed to Label3D ---\n');
+% for i = 1:numCameras
+%     camName = labelingCameraNames{i};
+%     fprintf('  Camera %s (Index %d) Data:\n', camName, i);
+%     fprintf('    myCamParams{%d}.r:\n', i);
+%     disp(myCamParams{i}.r);
+%     fprintf('    myCamParams{%d}.t:\n', i);
+%     disp(myCamParams{i}.t);
+% end
+% fprintf('--- End Data Verification ---\n\n');
 % --- END LOGGING DATA PASSED TO Label3D ---
 
 % =========================================================================
@@ -582,7 +635,8 @@ else
             'savePath', labelingOutputDir, ...
             'cameraNames', labelingCameraNames, ...
             'camPrefixMap', camNameToPrefixMap, ...
-            'undistortedImages', true);
+            'undistortedImages', true, ...
+            'nAnimals', nAnimals);
 
         % --- Inject Precomputed 2D Poses (if enabled) ---
         if loadPrecomputedPoses
@@ -681,7 +735,7 @@ else
                     for session_cam_logical_idx = 1:numel(session_labelingCameraNames_check) 
                         current_session_cam_name = session_labelingCameraNames_check{session_cam_logical_idx}; % Get current cam name
 
-                        % *** NEW CHECK: Only load poses if this camera is in camerasToLoadPosesFor ***
+                        % *** Only load poses if this camera is in camerasToLoadPosesFor ***
                         if ~isempty(camerasToLoadPosesFor) && ~ismember(current_session_cam_name, string(camerasToLoadPosesFor)) 
                             % fprintf('  Skipping pose loading for camera %s as it is not in camerasToLoadPosesFor.\n', current_session_cam_name);
                             continue; % Skip to next session camera

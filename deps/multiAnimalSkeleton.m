@@ -28,8 +28,43 @@ function newSkeleton = multiAnimalSkeleton(baseSkeleton, nAnimals)
 
     newSkeleton.joints_idx = jointIndex;
 
-    connectionColors = repmat(baseSkeleton.color, nAnimals, 1);
-    newSkeleton.color = connectionColors;
+    % Logic for distinct animal segment colors
+    newSkeleton.color = []; % Initialize
+
+    % Define base color themes for animals
+    % Each row is an RGB triplet for an animal's segments
+    animal_color_themes = [
+        0.2, 0.4, 0.8;  % Bluish for Animal 1
+        0.8, 0.3, 0.2;  % Reddish for Animal 2
+        0.2, 0.8, 0.4;  % Greenish for Animal 3
+        0.8, 0.8, 0.2;  % Yellowish for Animal 4
+        0.6, 0.2, 0.8;  % Purplish for Animal 5
+        0.8, 0.5, 0.2   % Orangish for Animal 6
+    ];
+
+    if nAnimals > size(animal_color_themes, 1)
+        warning('multiAnimalSkeleton:NotEnoughColors', ...
+                'Not enough predefined distinct color themes for all animals. Colors will be recycled.');
+    end
+
+    for i = 1:nAnimals
+        % Select a color theme for the current animal
+        % Cycle through themes if nAnimals > number of defined themes
+        theme_idx = mod(i-1, size(animal_color_themes, 1)) + 1;
+        current_theme_color = animal_color_themes(theme_idx, :);
+
+        % Create a color matrix for all segments of the current animal using this theme
+        % nConnections is the number of segments for a single base skeleton
+        animal_segments_colors = repmat(current_theme_color, nConnections, 1);
+        
+        newSkeleton.color = [newSkeleton.color; animal_segments_colors];
+    end
+
+    % Ensure the number of color rows matches the total number of segment indices
+    if size(newSkeleton.color, 1) ~= size(newSkeleton.joints_idx, 1)
+        error('multiAnimalSkeleton:MismatchColorSegments', ...
+              'Mismatch between the number of generated segment colors and segment indices.');
+    end
 
     %uniqueColors = customColorMap(nAnimals);
     %markerColors = repelem(uniqueColors, nMarkers , 1);

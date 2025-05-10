@@ -170,6 +170,7 @@ classdef Label3D < Animator
         visibleDragPoints = true; %p assed to DraggableKeypoint2DAnimator constructor
         sessionDatestr % date string during load: used to set save file name
         camPrefixMap % Map from Cam_XXX name to hardware ID prefix
+        nAnimalsInSession % Number of animals being labeled in this session
 
         % ===========================
         % Useful Inherited properties
@@ -267,80 +268,137 @@ classdef Label3D < Animator
             if ~isempty(skeleton)
                 obj.skeleton = skeleton;
             end
-            if ~isempty(varargin)
-                set(obj, varargin{:})
-            end
-            
-            % --- Handle Optional Inputs (Build clean list for set) ---
+            % if ~isempty(varargin) % Original line
+            %    set(obj, varargin{:}) % Original line
+            % end % Original line
+        
+            % --- Handle Optional Inputs including 'nAnimals' ---
             obj.camPrefixMap = containers.Map('KeyType', 'char', 'ValueType', 'char'); % Initialize empty
-            argsForSet = {}; % Cell array for arguments to pass to set()
-            processedMap = false; % Flag to ensure we only process it once
-            
+            obj.nAnimalsInSession = 0; % Default, will be set from varargin
+            obj.framesToLabel = []; % Initialize framesToLabel
+            obj.cameraNames = {}; % Initialize cameraNames
+            obj.undistortedImages = false; % Default for undistortedImages (can be overridden by Animator's default)
+            % savePath is initialized to '' by default in properties
+
+            nAnimalsVal = []; 
+            camPrefixMapVal = [];
+            passedFramesToLabel = [];
+            passedSavePath = '';
+            passedCameraNames = {};
+            passedUndistortedImages = []; % Use empty to detect if it was explicitly passed
+
+            otherArgsForSet = {}; 
             i = 1;
             while i <= numel(varargin)
                 if (ischar(varargin{i}) || isstring(varargin{i})) && i+1 <= numel(varargin)
                     paramName = varargin{i};
                     paramValue = varargin{i+1};
-                    
-                    if ~processedMap && strcmpi(paramName, 'camPrefixMap')
-                        % Process camPrefixMap
-                        if isa(paramValue, 'containers.Map') % Use isa() to check type
-                            obj.camPrefixMap = paramValue;
-                            fprintf('DEBUG buildFromScratch: Successfully processed camPrefixMap.\n');
-                        else
-                            warning('Label3D:buildFromScratch', 'Optional input ''camPrefixMap'' ignored: value is not a containers.Map.'); % Doubled single quotes
-                        end
-                        processedMap = true; % Mark as processed
-                        % DO NOT add to argsForSet
-                    else
-                        % Add other valid key-value pairs to argsForSet
-                        argsForSet{end+1} = paramName;
-                        argsForSet{end+1} = paramValue;
+        
+                    switch lower(paramName)
+                        case 'nanimals'
+                            nAnimalsVal = paramValue;
+                        case 'camprefixmap'
+                            if isa(paramValue, 'containers.Map')
+                                camPrefixMapVal = paramValue;
+                                fprintf('DEBUG buildFromScratch: Successfully queued camPrefixMap.\n');
+                            else
+                                warning('Label3D:buildFromScratch', 'Optional input ''camPrefixMap'' ignored: value is not a containers.Map.');
+                            end
+                        case 'framestolabel'
+                            passedFramesToLabel = paramValue;
+                        case 'savepath'
+                            passedSavePath = paramValue;
+                        case 'cameranames'
+                            passedCameraNames = paramValue;
+                        case 'undistortedimages'
+                            passedUndistortedImages = paramValue; % Store it, could be logical
+                        otherwise
+                            % Add other valid key-value pairs to otherArgsForSet
+                            otherArgsForSet{end+1} = paramName;
+                            otherArgsForSet{end+1} = paramValue;
                     end
                     i = i + 2; % Move past key and value
                 else
                     % Handle potential malformed varargin or single trailing argument
-                    warning('Label3D:buildFromScratch', 'Skipping unexpected or incomplete input argument near index %d', i);
+                    % If it's the last argument and not a pair, it might be a flag for the Animator base class
+                    if i == numel(varargin) && (ischar(varargin{i}) || isstring(varargin{i}))
+                         otherArgsForSet{end+1} = varargin{i};
+                    else
+                        warning('Label3D:buildFromScratch', 'Skipping unexpected or incomplete input argument near index %d', i);
+                    end
                     i = i + 1;
                 end
             end
-            
-            % --- Debugging before set ---
-            fprintf('DEBUG: Size of argsForSet before set: %d\n', numel(argsForSet));
-            if ~isempty(argsForSet)
-                 fprintf('DEBUG: Contents of argsForSet before set:\n');
-                 disp(argsForSet);
+        
+            % Assign parsed critical values
+            if ~isempty(nAnimalsVal)
+                obj.nAnimalsInSession = nAnimalsVal;
             else
-                 fprintf('DEBUG: argsForSet is empty before set.\n');
+                error('Label3D:buildFromScratch', '''nAnimals'' must be provided as a named argument.');
             end
-            % --- End Debugging ---
+            
+            if ~isempty(camPrefixMapVal)
+                obj.camPrefixMap = camPrefixMapVal;
+            end
 
-            % Apply the filtered arguments using set
-            if ~isempty(argsForSet)
-                 if mod(numel(argsForSet), 2) ~= 0
-                     warning('Label3D:buildFromScratch', 'argsForSet has odd number of elements. Skipping set().');
-                     disp(argsForSet); % Display the problematic array
+            if ~isempty(passedFramesToLabel)
+                obj.framesToLabel = passedFramesToLabel;
+            end
+            if ~isempty(passedSavePath)
+                obj.savePath = passedSavePath; % This will be combined with filename later
+            end
+            if ~isempty(passedCameraNames)
+                obj.cameraNames = passedCameraNames;
+            end
+            if ~isempty(passedUndistortedImages) % Check if it was explicitly passed
+                obj.undistortedImages = passedUndistortedImages;
+            end
+
+            % Apply any remaining arguments using set
+            if ~isempty(otherArgsForSet)
+                 if mod(numel(otherArgsForSet), 2) ~= 0 && ~(numel(otherArgsForSet)==1 && (ischar(otherArgsForSet{1}) || isstring(otherArgsForSet{1}) ))
+                     warning('Label3D:buildFromScratch', 'otherArgsForSet has an odd number of elements (and is not a single flag). Skipping set().');
+                     disp(otherArgsForSet);
                  else
                      try
-                        set(obj, argsForSet{:});
-                        fprintf('DEBUG buildFromScratch: set(obj, argsForSet{:}) executed successfully.\n');
+                        set(obj, otherArgsForSet{:});
+                        fprintf('DEBUG buildFromScratch: set(obj, otherArgsForSet{:}) executed successfully.\n');
                      catch ME_set
-                         fprintf('ERROR during set(obj, argsForSet{:}):\n');
-                         disp(argsForSet); % Display args that caused error
+                         fprintf('ERROR during set(obj, otherArgsForSet{:}):\n');
+                         disp(otherArgsForSet); 
                          rethrow(ME_set);
                      end
                  end
             else
-                 fprintf('DEBUG buildFromScratch: No arguments remaining for set().\n');
+                 fprintf('DEBUG buildFromScratch: No other arguments for set().\n');
             end
             % --- End Handle Optional Inputs ---
-             
+
+            % Basic validation for nAnimalsInSession
+            if obj.nAnimalsInSession <= 0
+                error('Label3D:buildFromScratch', 'nAnimalsInSession must be greater than 0.');
+            end
+            % obj.nMarkers will be set later after skeleton.joint_names is known
+            
              % Set up Animator parameters
             obj.origCamParams = camParams;
             obj.nFrames = size(videos{1}, 4);
             obj.origNFrames = obj.nFrames;
-            obj.frameInds = 1 : obj.nFrames;
+            
+            % If framesToLabel was not passed or is empty, default to all frames of the video
+            if isempty(obj.framesToLabel) 
+                obj.framesToLabel = 1 : obj.nFrames;
+            end
+            obj.frameInds = obj.framesToLabel; % Use the potentially subsetted frames for frameInds
+            obj.nFrames = numel(obj.frameInds); % Update nFrames to reflect the number of frames to be labeled
+
             obj.nMarkers = numel(obj.skeleton.joint_names);
+        
+            % Validate nMarkers against nAnimalsInSession
+            if obj.nMarkers > 0 && obj.nAnimalsInSession > 0 && mod(obj.nMarkers, obj.nAnimalsInSession) ~= 0
+                warning('Label3D:buildFromScratch', 'Number of markers (%d) is not evenly divisible by nAnimalsInSession (%d). Swap ID functionality might be affected.', obj.nMarkers, obj.nAnimalsInSession);
+            end
+
             obj.sessionDatestr = datestr(now, 'yyyymmdd_HHMMss_');
             filename = [obj.sessionDatestr, 'Label3D'];
             obj.savePath = fullfile(obj.savePath, filename);
@@ -361,11 +419,36 @@ classdef Label3D < Animator
             end
             for nCam = 1 : obj.nCams
                 pos = obj.videoPositions(nCam, :);
-                obj.h{nCam} = VideoAnimator(videos{nCam}, 'Position', pos);
+                obj.h{nCam} = VideoAnimator(videos{nCam}, 'Position', pos, 'frameInds', obj.frameInds); % Pass frameInds
                 ax = obj.h{nCam}.Axes;
                 ax.Toolbar.Visible = 'off';
                 set(ax, 'XTick', [], 'YTick', []);
                 set(obj.h{nCam}.img, 'ButtonDownFcn', @obj.clickImage);
+
+                % --- ADD SWAP ID BUTTON for this camera view ---
+                btnWidth = 0.08; % Normalized width
+                btnHeight = 0.035; % Normalized height for button text visibility
+                % Position button at the bottom-right of the video panel
+                btnX = pos(1) + pos(3) - btnWidth - 0.005; % X: right edge - width - small margin
+                btnY = pos(2) + 0.005; % Y: bottom edge + small margin
+        
+                % Ensure button is within figure bounds (basic check, might need refinement)
+                btnX = max(0.001, btnX); % Keep slightly off edge
+                btnY = max(0.001, btnY);
+                % Ensure button doesn't overflow figure right/top if panel is too small (less likely for bottom-right)
+                % btnX = min(btnX, 1 - btnWidth - 0.001);
+                % btnY = min(btnY, 1 - btnHeight - 0.001);
+
+
+                uicontrol('Parent', obj.Parent, ... 
+                          'Style', 'pushbutton', ...
+                          'String', sprintf('Swap Cam%d IDs', nCam), ...
+                          'Units', 'normalized', ...
+                          'Position', [btnX, btnY, btnWidth, btnHeight], ...
+                          'Callback', @(~,~) obj.swapAnimalIDsInView(nCam), ...
+                          'Tag', sprintf('SwapButtonCam%d', nCam), ...
+                          'TooltipString', sprintf('Swap Animal IDs for camera %d in current frame', nCam), ...
+                          'FontSize', 7); % Smaller font for compact button
             end
             
             % --- Add Camera Name Overlay & Principal Point ---
@@ -800,37 +883,29 @@ classdef Label3D < Animator
 
                 cameraIndicesUsed = find(camsLogicalRow); % Store indices
                 
-                % --- START NEW LOGGING --- 
-                fprintf('--- Inputs to triangulateMultiview for Joint %d ---\n', joint);
-                fprintf('  Undistorted 2D Points (pointTracks.Points):\n');
-                disp(pointTracks.Points);
+                % fprintf('--- Inputs to triangulateMultiview for Joint %d ---\n', joint);
+                % fprintf('  Undistorted 2D Points (pointTracks.Points):\n');
+                % disp(pointTracks.Points);
                 
-                % fprintf('  Camera Indices Used: %s\n', mat2str(find(camsLogicalRow)));
-                fprintf('  Camera Indices Used: %s\n', mat2str(cameraIndicesUsed)); % Use stored indices
+                % fprintf('  Camera Indices Used: %s\n', mat2str(cameraIndicesUsed)); % Use stored indices
                 
                 % --- Add check for empty indices --- 
                 if isempty(cameraIndicesUsed)
-                    fprintf('  WARNING: No valid camera indices found for joint %d in this frame. Skipping triangulation.\n', joint);
+                    % fprintf('  WARNING: No valid camera indices found for joint %d in this frame. Skipping triangulation.\n', joint);
                     continue; % Skip to the next joint
                 end
                 % --- End check ---
                 
-                % Extract and display the exact poses being used from obj.cameraPoses
-                % poses_to_use = obj.cameraPoses(find(camsLogicalRow),:);
                 poses_to_use = obj.cameraPoses(cameraIndicesUsed,:); % Use stored indices
-                fprintf('  Poses Passed (from obj.cameraPoses):\n');
-                disp(poses_to_use); % Display the relevant rows of the table
+                % fprintf('  Poses Passed (from obj.cameraPoses):\n');
+                % disp(poses_to_use); % Display the relevant rows of the table
                 
-                % Extract and display intrinsics used
-                % intrinsics_to_use = intrinsics(find(camsLogicalRow));
                 intrinsics_to_use = intrinsics(cameraIndicesUsed); % Use stored indices
-                fprintf('  Intrinsics Passed:\n');
-                for intr_idx = 1:numel(intrinsics_to_use)
-                   % fprintf('  Camera %d Intrinsics:\n', find(camsLogicalRow)(intr_idx));
-                   fprintf('  Camera %d Intrinsics:\n', cameraIndicesUsed(intr_idx)); % Use stored indices
-                   disp(intrinsics_to_use(intr_idx)); % Display the cameraIntrinsics object
-                end
-                % --- END NEW LOGGING ---
+                % fprintf('  Intrinsics Passed:\n');
+                % for intr_idx = 1:numel(intrinsics_to_use)
+                %    fprintf('  Camera %d Intrinsics:\n', cameraIndicesUsed(intr_idx)); % Use stored indices
+                %    disp(intrinsics_to_use(intr_idx)); % Display the cameraIntrinsics object
+                % end
 
                 % The actual triangulation call
                  % obj.cameraPoses(find(camsLogicalRow), :), intrinsics(find(camsLogicalRow)));
@@ -841,10 +916,10 @@ classdef Label3D < Animator
                  current_xyzPoint = []; % Initialize to empty
                  triangulation_successful = false; 
                  try
-                     fprintf('Attempting triangulation for joint %d...\n', joint); % Log before call
+                     % fprintf('Attempting triangulation for joint %d...\n', joint); % Log before call
                      current_xyzPoint = triangulateMultiview(pointTracks, poses_to_use, intrinsics_to_use);
                      triangulation_successful = true;
-                     fprintf('Triangulation call completed for joint %d.\n', joint); % Log after call
+                     % fprintf('Triangulation call completed for joint %d.\n', joint); % Log after call
                  catch ME
                      fprintf('!!! ERROR during triangulateMultiview call for joint %d !!!\n', joint);
                      fprintf('Error Identifier: %s\n', ME.identifier);
@@ -855,29 +930,26 @@ classdef Label3D < Animator
                  end
 
                 % --- START Log Output / Result Inspection ---
-                % fprintf('  Output 3D Point for Joint %d: ', joint);
-                % % disp(xyzPoints(nJoint, :));
-                % disp(current_xyzPoint);
-                fprintf('  Result Inspection for Joint %d:\n', joint);
-                fprintf('    Success Flag: %d\n', triangulation_successful);
-                fprintf('    Output Type: %s\n', class(current_xyzPoint));
-                fprintf('    Output Size: %s\n', mat2str(size(current_xyzPoint)));
-                fprintf('    Output Value (current_xyzPoint): ');
-                disp(current_xyzPoint); % Display the result
-                fprintf('----------------------------------------------------');
+                % fprintf('  Result Inspection for Joint %d:\n', joint);
+                % fprintf('    Success Flag: %d\n', triangulation_successful);
+                % fprintf('    Output Type: %s\n', class(current_xyzPoint));
+                % fprintf('    Output Size: %s\n', mat2str(size(current_xyzPoint)));
+                % fprintf('    Output Value (current_xyzPoint): ');
+                % disp(current_xyzPoint); % Display the result
+                % fprintf('----------------------------------------------------');
                 % --- END Log Output ---
                 
                 % --- Assign result inside the loop --- 
                 % obj.points3D(joint, :, frame) = current_xyzPoint;
                 if triangulation_successful && isnumeric(current_xyzPoint) && isequal(size(current_xyzPoint), [1, 3]) && ~any(isnan(current_xyzPoint)) && ~any(isinf(current_xyzPoint))
-                    fprintf('    Assigning valid result to obj.points3D(%d, :, %d)\n', joint, frame);
+                    % fprintf('    Assigning valid result to obj.points3D(%d, :, %d)\n', joint, frame);
                     obj.points3D(joint, :, frame) = current_xyzPoint;
                 else
-                    fprintf('    Skipping assignment due to error or invalid result.\n');
+                    % fprintf('    Skipping assignment due to error or invalid result.\n');
                     % Optionally assign NaN if needed, or leave as is
                     % obj.points3D(joint, :, frame) = [NaN, NaN, NaN]; 
                 end
-                fprintf('----------------------------------------------------');
+                % fprintf('----------------------------------------------------');
 
             end % End of nJoint loop
             
@@ -911,24 +983,24 @@ classdef Label3D < Animator
                     obj.camPoints(jointIds, nCam, :, frame) = projectedImagePoints; % Storing the reprojected points
 
                     % --- BEGIN ADDED PRINT STATEMENTS ---
-                    if ~isempty(projectedImagePoints)
-                        fprintf('--- Reprojection Details for Frame %d, Camera %d ---\\n', frame, nCam); % Ensure this main title has a newline
-                        for jIdx = 1:numel(jointIds)
-                            currentJointId = jointIds(jIdx);
-                            % Ensure we only try to access valid rows in worldPoints and projectedImagePoints
-                            if jIdx <= size(worldPoints, 1) && jIdx <= size(projectedImagePoints, 1)
-                                fprintf('  Joint ID: %d\\n', currentJointId); % Added newline
-                                fprintf('    Input 3D Point (worldPoints(%d, :)): [%.4f, %.4f, %.4f]\\n', ...
-                                    jIdx, worldPoints(jIdx, 1), worldPoints(jIdx, 2), worldPoints(jIdx, 3)); % Added newline
-                                fprintf('    Output 2D Reprojected Point (projectedImagePoints(%d, :)): [%.4f, %.4f]\\n', ...
-                                    jIdx, projectedImagePoints(jIdx, 1), projectedImagePoints(jIdx, 2)); % Added newline
-                            else
-                                fprintf('    Skipping print for joint index %d due to inconsistent sizes (worldPoints: %d, projected: %d rows)\\n', ...
-                                    jIdx, size(worldPoints,1), size(projectedImagePoints,1)); % Added newline
-                            end
-                        end
-                        fprintf('----------------------------------------------------\\n'); % Ensure this footer has a newline
-                    end
+                    % if ~isempty(projectedImagePoints)
+                    %     fprintf('--- Reprojection Details for Frame %d, Camera %d ---\\n', frame, nCam); 
+                    %     for jIdx = 1:numel(jointIds)
+                    %         currentJointId = jointIds(jIdx);
+                    %         % Ensure we only try to access valid rows in worldPoints and projectedImagePoints
+                    %         if jIdx <= size(worldPoints, 1) && jIdx <= size(projectedImagePoints, 1)
+                    %             fprintf('  Joint ID: %d\\n', currentJointId);   
+                    %             fprintf('    Input 3D Point (worldPoints(%d, :)): [%.4f, %.4f, %.4f]\\n', ...
+                    %                 jIdx, worldPoints(jIdx, 1), worldPoints(jIdx, 2), worldPoints(jIdx, 3)); 
+                    %             fprintf('    Output 2D Reprojected Point (projectedImagePoints(%d, :)): [%.4f, %.4f]\\n', ...
+                    %                 jIdx, projectedImagePoints(jIdx, 1), projectedImagePoints(jIdx, 2));
+                    %         else
+                    %             fprintf('    Skipping print for joint index %d due to inconsistent sizes (worldPoints: %d, projected: %d rows)\\n', ...
+                    %                 jIdx, size(worldPoints,1), size(projectedImagePoints,1));
+                    %         end
+                    %     end
+                    %     fprintf('----------------------------------------------------\\n');
+                    % end
                     % --- END ADDED PRINT STATEMENTS ---
                 end
             end
@@ -1044,7 +1116,9 @@ classdef Label3D < Animator
         function checkStatus(obj)
             % Update the movement status for the current frame, if
             % necessary
-            f = obj.frameInds(obj.frame);
+            sessionFrameIdx = obj.frame; % GUI frame index (1 to numel(obj.frameInds))
+            actualVideoFrameIdx = obj.frameInds(sessionFrameIdx); % actual video frame number, for things like 'dragged' status
+
             for nKPAnimator = 1 : obj.nCams
                 kpAnimator = obj.h{obj.nCams + nKPAnimator};
                 currentMarkerCoords = kpAnimator.getCurrentFramePositions();
@@ -1054,24 +1128,36 @@ classdef Label3D < Animator
                 if isempty(obj.initialMarkers)
                     % 23x1 logical array = 1 if marker is not default position
                     hasMoved = any(~isnan(currentMarkerCoords), 2);
-                    obj.status(~hasMoved, nKPAnimator, f) = 0;
+                    obj.status(~hasMoved, nKPAnimator, sessionFrameIdx) = 0;
                 else
                     cM = currentMarkerCoords;
                     iM = zeros(size(cM));
-                    iM(:) = permute(obj.initialMarkers{nKPAnimator}(f, :, :), [1, 3, 2]);
+                    % initialMarkers is {nCam}(actualFrame, 2, nMarkers)
+                    % Need to use actualVideoFrameIdx for initialMarkers if its first dim is origNFrames
+                    % Assuming initialMarkers{nAnimator} is (origNFrames, 2, nMarkers)
+                    % If obj.initialMarkers{nAnimator} is indexed by actual video frame ID:
+                    if actualVideoFrameIdx <= size(obj.initialMarkers{nKPAnimator},1)
+                        iM(:) = permute(obj.initialMarkers{nKPAnimator}(actualVideoFrameIdx, :, :), [1, 3, 2]);
+                    else
+                        % Handle case where actualVideoFrameIdx might be out of bounds for initialMarkers
+                        % This might happen if framesToLabel selects frames beyond what initialMarkers covers
+                        % Or if initialMarkers was not properly populated for all original frames.
+                        % For safety, assume no initial marker if out of bounds.
+                        iM(:) = nan(size(cM)); % Or some other appropriate default
+                    end
                     isDeleted = any(isnan(cM), 2);
                     iM(isnan(iM)) = 0;
                     cM(isnan(cM)) = 0;
                     hasMoved = any(round(iM, 3) ~= round(cM, 3), 2);
                     hasMoved = hasMoved & ~isDeleted;
-                    obj.status(isDeleted, nKPAnimator, f) = 0;
+                    obj.status(isDeleted, nKPAnimator, sessionFrameIdx) = 0;
                 end
-                obj.status(hasMoved, nKPAnimator, f) = obj.isLabeled;
-                obj.camPoints(:, nKPAnimator, :, f) = currentMarkerCoords;
+                obj.status(hasMoved, nKPAnimator, sessionFrameIdx) = obj.isLabeled;
+                obj.camPoints(:, nKPAnimator, :, sessionFrameIdx) = currentMarkerCoords;
                 
-                movedByHand = hasMoved & kpAnimator.dragged(f, :)';
-                obj.handLabeled2D(movedByHand, nKPAnimator, 1, f) = currentMarkerCoords(movedByHand, 1);
-                obj.handLabeled2D(movedByHand, nKPAnimator, 2, f) = currentMarkerCoords(movedByHand, 2);
+                movedByHand = hasMoved & kpAnimator.dragged(actualVideoFrameIdx, :)';
+                obj.handLabeled2D(movedByHand, nKPAnimator, 1, sessionFrameIdx) = currentMarkerCoords(movedByHand, 1);
+                obj.handLabeled2D(movedByHand, nKPAnimator, 2, sessionFrameIdx) = currentMarkerCoords(movedByHand, 2);
             end
         end
         
@@ -1565,14 +1651,14 @@ classdef Label3D < Animator
                 error('exportDannce:FrameNumbersMustBeProvided', [ ...
                     'Frame numbers for each frame in videos must be provided.\n' ...
                     'framesToLabel - Vector of frame numbers for each video frame.\n' ...
-                    'labelGui.exportDannce(''''framesToLabel'''', framesToLabel)'])
+                    'labelGui.exportDannce(''framesToLabel'', framesToLabel)']);
             end
             
             if p.totalFrames == -1
                 error(['totalFrames must be provided. This is the total number' ...
                     'of frames in the video to generate a sync variable.' ...
                     'Not just the number of frames being labeled' ...
-                    'E.g. 90000'])
+                    'E.g. 90000']);
             end
             totalFrames = p.totalFrames;
 
@@ -1670,8 +1756,122 @@ classdef Label3D < Animator
             else
                 save(outPath, 'labelData', 'handLabeled2D', 'params', 'camnames')
             end
+        end % End of exportDannce
+
+    % --- Method for Swapping Animal IDs ---
+    function swapAnimalIDsInView(obj, cameraIndex)
+        % Swaps the 2D labels of Animal 1 and Animal 2 for the specified
+        % cameraIndex in the current frame, then re-triangulates and updates.
+
+        currentFrameGlobalIdx = obj.frame; 
+
+        if obj.nAnimalsInSession == 0
+            warning('Label3D:swapAnimalIDsInView', 'nAnimalsInSession is 0. Cannot perform swap.');
+            return;
         end
-    end
+        if obj.nMarkers == 0
+            warning('Label3D:swapAnimalIDsInView', 'nMarkers is 0. Cannot perform swap.');
+            return;
+        end
+
+        if obj.nAnimalsInSession ~= 2
+            warning('Label3D:swapAnimalIDsInView', ...
+                    'Swap ID logic is currently implemented for 2 animals only. Found %d animals. No action taken.', ...
+                    obj.nAnimalsInSession);
+            return;
+        end
+
+        keypointsPerAnimal = obj.nMarkers / obj.nAnimalsInSession; 
+        if ~(keypointsPerAnimal > 0 && rem(keypointsPerAnimal,1)==0)
+            warning('Label3D:swapAnimalIDsInView', 'Cannot proceed with swap: Invalid keypointsPerAnimal calculation (nMarkers=%d, nAnimalsInSession=%d).', obj.nMarkers, obj.nAnimalsInSession);
+            return;
+        end
+
+        animal1_indices = 1:keypointsPerAnimal;
+        animal2_indices = (keypointsPerAnimal + 1) : (2 * keypointsPerAnimal);
+
+        % --- Defensive checks for obj.frame and obj.frameInds ---
+        if isempty(obj.frameInds)
+            warning('Label3D:swapAnimalIDsInView', 'obj.frameInds is empty. Cannot proceed.');
+            return;
+        end
+        if ~isscalar(obj.frame) || obj.frame <= 0 || obj.frame > numel(obj.frameInds)
+            warning('Label3D:swapAnimalIDsInView', 'obj.frame (value: %d) is an invalid index for obj.frameInds (size: %d). Cannot proceed.', obj.frame, numel(obj.frameInds));
+            return;
+        end
+        % --- End defensive checks ---
+
+        actualFrameToProcess = obj.frameInds(obj.frame); 
+
+        % Modified fprintf to ensure clean line continuation
+        fprintf('Swapping IDs for Camera %d, GUI Frame %d (Actual Video Frame %d).\n', ...
+                cameraIndex, obj.frame, actualFrameToProcess);
+
+        targetFrameForArray = obj.frame;
+
+        if isempty(obj.camPoints) || ndims(obj.camPoints) ~= 4
+            warning('Label3D:swapAnimalIDsInView', 'obj.camPoints not properly initialized. Aborting swap.');
+            return;
+        end
+        if size(obj.camPoints,1) < max(animal2_indices) || size(obj.camPoints,2) < cameraIndex || size(obj.camPoints,4) < targetFrameForArray
+             warning('Label3D:swapAnimalIDsInView', 'Index out of bounds for obj.camPoints. Aborting swap. Size: %s, Indices: m=%d, c=%d, f=%d', mat2str(size(obj.camPoints)), max(animal2_indices), cameraIndex, targetFrameForArray);
+            return;
+        end
+        
+        if isempty(obj.status) || ndims(obj.status) ~= 3
+            warning('Label3D:swapAnimalIDsInView', 'obj.status not properly initialized. Aborting swap.');
+            return;
+        end
+         if size(obj.status,1) < max(animal2_indices) || size(obj.status,2) < cameraIndex || size(obj.status,3) < targetFrameForArray
+             warning('Label3D:swapAnimalIDsInView', 'Index out of bounds for obj.status. Aborting swap. Size: %s, Indices: m=%d, c=%d, f=%d', mat2str(size(obj.status)),max(animal2_indices), cameraIndex, targetFrameForArray);
+            return;
+        end
+
+        if isempty(obj.handLabeled2D) || ndims(obj.handLabeled2D) ~= 4
+             warning('Label3D:swapAnimalIDsInView', 'obj.handLabeled2D not properly initialized. Aborting swap.');
+            return;
+        end
+        if size(obj.handLabeled2D,1) < max(animal2_indices) || size(obj.handLabeled2D,2) < cameraIndex || size(obj.handLabeled2D,4) < targetFrameForArray
+             warning('Label3D:swapAnimalIDsInView', 'Index out of bounds for obj.handLabeled2D. Aborting swap. Size: %s, Indices: m=%d, c=%d, f=%d', mat2str(size(obj.handLabeled2D)),max(animal2_indices), cameraIndex, targetFrameForArray);
+            return;
+        end
+
+        temp_camPoints_animal1 = obj.camPoints(animal1_indices, cameraIndex, :, targetFrameForArray);
+        temp_camPoints_animal2 = obj.camPoints(animal2_indices, cameraIndex, :, targetFrameForArray);
+
+        temp_status_animal1    = obj.status(animal1_indices, cameraIndex, targetFrameForArray);
+        temp_status_animal2    = obj.status(animal2_indices, cameraIndex, targetFrameForArray);
+
+        temp_handLabeled_animal1 = obj.handLabeled2D(animal1_indices, cameraIndex, :, targetFrameForArray);
+        temp_handLabeled_animal2 = obj.handLabeled2D(animal2_indices, cameraIndex, :, targetFrameForArray);
+
+        obj.camPoints(animal1_indices, cameraIndex, :, targetFrameForArray) = temp_camPoints_animal2;
+        obj.camPoints(animal2_indices, cameraIndex, :, targetFrameForArray) = temp_camPoints_animal1;
+
+        obj.status(animal1_indices, cameraIndex, targetFrameForArray)    = temp_status_animal2;
+        obj.status(animal2_indices, cameraIndex, targetFrameForArray)    = temp_status_animal1;
+        
+        obj.handLabeled2D(animal1_indices, cameraIndex, :, targetFrameForArray) = temp_handLabeled_animal2;
+        obj.handLabeled2D(animal2_indices, cameraIndex, :, targetFrameForArray) = temp_handLabeled_animal1;
+        
+        fprintf('  Data swapped in camPoints, status, and handLabeled2D for camera %d.\n', cameraIndex);
+
+        % Call update() BEFORE checkStatus() to ensure animators reflect the swap first
+        obj.update();
+        fprintf('  GUI update() completed.\n');
+
+        obj.checkStatus(); 
+        fprintf('  checkStatus() completed.\n');
+
+        if obj.autosave
+            obj.saveState(); 
+            fprintf('  Session auto-saved after ID swap.\n');
+        end
+        
+        fprintf('ID Swap complete for Camera %d, GUI Frame %d.\n', cameraIndex, obj.frame);
+    end % End of swapAnimalIDsInView method
+
+    end % End of PUBLIC methods block (this end was already here for the main public methods)
     
     methods (Access = private)
         function reset(obj)
@@ -1738,6 +1938,21 @@ classdef Label3D < Animator
             data = load(file);
             camParams = data.camParams;
             skel = data.skeleton;
+            % Ensure 'nAnimals' is part of varargin if needed by buildFromScratch
+            % Or extract from 'data' if stored there and pass explicitly
+            if isfield(data, 'nAnimalsInSession_LABEL3D') % Check for a uniquely named field
+                current_nAnimals = data.nAnimalsInSession_LABEL3D;
+                 varargin = [varargin, {'nAnimals', current_nAnimals}];
+            elseif isfield(data,'skeleton') && isfield(data.skeleton, 'nAnimals') % Check common/expected places
+                current_nAnimals = data.skeleton.nAnimals;
+                varargin = [varargin, {'nAnimals', current_nAnimals}];
+            else
+                % Attempt to infer if possible, or default/error
+                % This part is tricky without knowing how nAnimals was previously associated with saved state
+                % For now, assume it must be passed or an error will occur in buildFromScratch
+                warning('Label3D:loadFromState', 'nAnimals not found in saved state, ensure it is passed via varargin if buildFromScratch requires it.');
+            end
+
             obj.buildFromScratch(camParams, videos, skel, varargin{:});
             obj.loadState(file)
             if isfield(data, 'sync')
@@ -1750,6 +1965,16 @@ classdef Label3D < Animator
         
         function loadAll(obj, path, varargin)
             data = load(path);
+            % Similar to loadFromState, ensure 'nAnimals' is handled for buildFromScratch
+             if isfield(data, 'nAnimalsInSession_LABEL3D')
+                current_nAnimals = data.nAnimalsInSession_LABEL3D;
+                varargin = [varargin, {'nAnimals', current_nAnimals}];
+            elseif isfield(data,'skeleton') && isfield(data.skeleton, 'nAnimals')
+                current_nAnimals = data.skeleton.nAnimals;
+                varargin = [varargin, {'nAnimals', current_nAnimals}];
+            else
+                warning('Label3D:loadAll', 'nAnimals not found in saved data, ensure it is passed via varargin if buildFromScratch requires it.');
+            end
             obj.buildFromScratch(data.camParams, data.videos, data.skeleton, varargin{:});
             obj.loadFrom3D(data.data_3D);
             if isfield(data, 'sync')
@@ -1777,8 +2002,10 @@ classdef Label3D < Animator
                 obj.loadAll(files, varargin{:});
             end
         end
-    end
+    end % End of methods (Access = private) block
     
+    % --- Misplaced function removed from here, it is now correctly placed above ---
+
     methods (Access = protected)
         function update(obj)
             % Update all of the other animators with any new data.
@@ -1792,9 +2019,11 @@ classdef Label3D < Animator
                 obj.h{kpaId}.markersX(:) = kps(:, 1, :);
                 obj.h{kpaId}.markersY(:) = kps(:, 2, :);
                 
-                fr = obj.frameInds(obj.frame);
-                obj.h{kpaId}.points.XData(:) = kps(fr, 1, :);
-                obj.h{kpaId}.points.YData(:) = kps(fr, 2, :);
+                % fr = obj.frameInds(obj.frame); % fr is the *actual video frame number* - This was the source of the bug for XData/YData
+                % obj.h{kpaId}.points.XData and YData should be for the *current GUI frame*
+                % The index into 'kps' (which is nFrames_in_session x 2 x nMarkers) should be obj.frame, not fr.
+                obj.h{kpaId}.points.XData(:) = squeeze(kps(obj.frame, 1, :));
+                obj.h{kpaId}.points.YData(:) = squeeze(kps(obj.frame, 2, :));
             end
             
             % Run all of the update functions.
