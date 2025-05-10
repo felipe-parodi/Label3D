@@ -7,8 +7,11 @@ Modified Label3D to include:
 - No reprojection of labeled points
 - TODO: visibility toggle
 
-is a GUI for the manual labeling of 3D keypoints in multiple cameras.
-![Label3D Animation](common/label3dAnimation.gif)
+Current flow:
+1. Load 2D pose data, frames, and camera calibration parameters.
+2. Correct IDs and poses as needed.
+3. Triangulate 3D poses.
+4. Save.
 
 ## Installation
 
