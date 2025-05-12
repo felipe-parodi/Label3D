@@ -454,18 +454,18 @@ classdef Label3D < Animator
                 
                 % Estimate button position (this part is now less reliable due to pagination changing axes positions)
                 % We might need to adjust this or create buttons dynamically in updateCameraViewLayout
-                estAxPos = obj.videoPositions(nCam, :); % Use pre-calculated pos for estimation
-                btnX = estAxPos(1) + estAxPos(3) - btnWidth - 0.005; 
-                btnY = estAxPos(2) + 0.005; 
-                btnX = max(0.001, btnX); 
-                btnY = max(0.001, btnY);
+                % estAxPos = obj.videoPositions(nCam, :); % Use pre-calculated pos for estimation % REMOVED
+                % btnX = estAxPos(1) + estAxPos(3) - btnWidth - 0.005; % REMOVED
+                % btnY = estAxPos(2) + 0.005; % REMOVED
+                % btnX = max(0.001, btnX); % REMOVED
+                % btnY = max(0.001, btnY); % REMOVED
 
 
                 uicontrol('Parent', obj.Parent, ... 
                           'Style', 'pushbutton', ...
                           'String', sprintf('Swap Cam%d IDs', nCam), ...
                           'Units', 'normalized', ...
-                           'Position', [btnX, btnY, btnWidth, btnHeight], ... % POSITIONING NEEDS REVIEW/REWORK with pagination
+                           'Position', [0 0 0.01 0.01], ... % Initial small, off-screen position
                           'Callback', @(~,~) obj.swapAnimalIDsInView(nCam), ...
                           'Tag', sprintf('SwapButtonCam%d', nCam), ...
                           'TooltipString', sprintf('Swap Animal IDs for camera %d in current frame', nCam), ...
@@ -2001,11 +2001,12 @@ classdef Label3D < Animator
     
                     % Show and position the Swap ID button for this visible camera
                     if ~isempty(swapButtonHandle) && ishandle(swapButtonHandle)
-                        btnWidth = 0.08;
+                        btnWidth = 0.08;  % Ensure these are defined or use obj properties if they become dynamic
                         btnHeight = 0.035;
-                        btnX = currentPos(1) + currentPos(3) - btnWidth - 0.005;
-                        btnY = currentPos(2) + 0.005;
-                        set(swapButtonHandle, 'Position', [btnX, btnY, btnWidth, btnHeight], 'Visible', 'on');
+                        % New position: Top-left of the current axes view
+                        btnX_new = currentPos(1) + 0.005; % Offset from left edge of axes
+                        btnY_new = currentPos(2) + currentPos(4) - btnHeight - 0.005; % Offset from top edge of axes
+                        set(swapButtonHandle, 'Position', [btnX_new, btnY_new, btnWidth, btnHeight], 'Visible', 'on');
                     end
                 else
                      warning('Label3D:updateCameraViewLayout', 'Invalid localIndex %d for pagePositions (size %d). Skipping positioning for Cam %d.', localIndex, size(pagePositions,1), nCam);
