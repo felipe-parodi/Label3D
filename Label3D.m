@@ -550,12 +550,14 @@ classdef Label3D < Animator
             end
             
             % Make the Draggable Keypoint Animators
+            newMarkerSize = 4; % Define desired marker size
             for nCam = 1 : obj.nCams
                 obj.h{obj.nCams + nCam} = ...
                     DraggableKeypoint2DAnimator(obj.markers{nCam}, ...
                     obj.skeleton, 'Axes', obj.h{nCam}.Axes, ... % Reuse axes from VideoAnimator
                     'visibleDragPoints', obj.visibleDragPoints, ...
-                    'DragPointColor', obj.DragPointColor);
+                    'DragPointColor', obj.DragPointColor, ...
+                    'MarkerSize', newMarkerSize); % <-- Pass the parameter here
                 ax = obj.h{obj.nCams + nCam}.Axes; % Axes are already invisible from VideoAnimator setup
                 ax.Toolbar.Visible = 'off';
                 xlim(ax, [1 obj.ImageSize(nCam, 2)])
