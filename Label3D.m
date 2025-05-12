@@ -172,9 +172,10 @@ classdef Label3D < Animator
         sessionDatestr % date string during load: used to set save file name
         camPrefixMap % Map from Cam_XXX name to hardware ID prefix
         nAnimalsInSession % Number of animals being labeled in this session
+        flipViewsVertically = false; % If true, display camera views flipped vertically
 
         % --- Camera View Pagination Properties ---
-        camerasPerPage = 6; % Number of camera views to show per page
+        camerasPerPage = 2; % Number of camera views to show per page
         currentCameraPage = 1; % Current page number (1-indexed)
         totalPages = 1; % Total number of pages (calculated)
         nextPageButton % Handle to the 'Next Page' button
@@ -202,13 +203,14 @@ classdef Label3D < Animator
             %                TDistort - Tangential distortion
             %                r - Rotation matrix
             %                t - Translation vector
-            %   videos: Cell array of h x w x c x nFrames videos.
-            %   skeleton: Structure with three fields:
+            %   videos: Cell array of videos. Videos are assumed to be
+            %           undistorted and frame matched beforehand.
+            %   skeleton: Structure with two fields:
             %       skeleton.color: nSegments x 3 matrix of RGB values
             %       skeleton.joints_idx: nSegments x 2 matrix of integers
             %           denoting directed edges between markers.
             %       skeleton.joint_names: cell array of names of each joint
-            %   Syntax: Label3D(camParams, videos, skeleton, varargin);
+            %   Syntax: Label3D.buildFromScratch(camParams, videos, skeleton, varargin);
             %
             % Input format 2: Load from state
             %    file: Path to saved Label3D state file (with or without
@@ -1040,7 +1042,15 @@ classdef Label3D < Animator
                             worldToImage(camParam, rotation, translation, ...
                             worldPoints, 'ApplyDistortion', true);
                     end
-                    obj.camPoints(jointIds, nCam, :, frame) = projectedImagePoints; % Storing the reprojected points
+                    % Check if the point is marked as invisible for this camera view
+                    for idx = 1:numel(jointIds)
+                        jointId = jointIds(idx);
+                        if obj.status(jointId, nCam, frame) == obj.isInvisible
+                            obj.camPoints(jointId, nCam, :, frame) = nan;
+                        else
+                            obj.camPoints(jointId, nCam, :, frame) = projectedImagePoints(idx, :);
+                        end
+                    end
 
                     % --- BEGIN ADDED PRINT STATEMENTS ---
                     % if ~isempty(projectedImagePoints)
@@ -1498,8 +1508,6 @@ classdef Label3D < Animator
                 % the installation of custom keypresscallback
                 % functions in ui default modes.
                 % See matlab.uitools.internal.uimode/setCallbackFcn
-                hManager = uigetmodemanager(obj.Parent);
-                matlab.graphics.internal.setListenerState(hManager.WindowListenerHandles, 'off');
                 
                 % We need to disable normal keypress mode
                 % functionality to prevent the command window from
@@ -2074,6 +2082,13 @@ classdef Label3D < Animator
                         btnX_new = currentPos(1) + 0.005; % Offset from left edge of axes
                         btnY_new = currentPos(2) + 0.005; % Offset from bottom edge of axes
                         set(swapButtonHandle, 'Position', [btnX_new, btnY_new, btnWidth_swap, btnHeight_swap], 'Visible', 'on');
+                    end
+
+                    % Set the view based on flipViewsVertically property
+                    if obj.flipViewsVertically
+                        view(videoAx, 180, 90);
+                    else
+                        view(videoAx, 0, 90);
                     end
                 else
                      warning('Label3D:updateCameraViewLayout', 'Invalid localIndex %d for pagePositions (size %d). Skipping positioning for Cam %d.', localIndex, size(pagePositions,1), nCam);
