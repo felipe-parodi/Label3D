@@ -131,6 +131,7 @@ classdef Label3D < Animator
         hiddenAxesPos = [0.99, 0.99, 0.01, 0.01] %used to relocate plots offscreen to hide them
         isLabeled = 2 % enum in status matrix representing labeled (by hand or computed)
         isInitialized = 1 % enum in status matrix representing initially provided points
+        isInvisible = 3 % enum in status matrix representing an invisible keypoint
         counter % text object: total # of labeled frames
     end
     
@@ -876,12 +877,14 @@ classdef Label3D < Animator
         function [camIds, jointIds] = getLabeledJoints(obj, frame)
             % Look within a frame and return all joints with at least two
             % labeled views, as well as a logical vector denoting which two
-            % views.
+            % views. Excludes points marked as invisible.
             s = zeros(size(obj.status, 1), size(obj.status, 2));
             s(:) = obj.status(:, :, frame);
-            labeled = s == obj.isLabeled | s == obj.isInitialized;
-            jointIds = find(sum(labeled, 2) >= 2);
-            camIds = labeled(jointIds, :);
+            % Original: labeled = s == obj.isLabeled | s == obj.isInitialized;
+            % New: Exclude points marked as isInvisible
+            usable_for_triangulation = (s == obj.isLabeled | s == obj.isInitialized) & (s ~= obj.isInvisible);
+            jointIds = find(sum(usable_for_triangulation, 2) >= 2);
+            camIds = usable_for_triangulation(jointIds, :);
         end
         
         function forceTriangulateLabeledPoints(obj, cam1, joint)
@@ -1172,50 +1175,80 @@ classdef Label3D < Animator
         
         function checkStatus(obj)
             % Update the movement status for the current frame, if
-            % necessary
+            % necessary. Prioritizes isInvisible status.
             sessionFrameIdx = obj.frame; % GUI frame index (1 to numel(obj.frameInds))
-            actualVideoFrameIdx = obj.frameInds(sessionFrameIdx); % actual video frame number, for things like 'dragged' status
+            actualVideoFrameIdx = obj.frameInds(sessionFrameIdx); % actual video frame number
 
             for nKPAnimator = 1 : obj.nCams
                 kpAnimator = obj.h{obj.nCams + nKPAnimator};
-                currentMarkerCoords = kpAnimator.getCurrentFramePositions();
-                
-                % If there were initializations, use those, otherwise
-                % just check for non-nans.
-                if isempty(obj.initialMarkers)
-                    % 23x1 logical array = 1 if marker is not default position
-                    hasMoved = any(~isnan(currentMarkerCoords), 2);
-                    obj.status(~hasMoved, nKPAnimator, sessionFrameIdx) = 0;
-                else
-                    cM = currentMarkerCoords;
-                    iM = zeros(size(cM));
-                    % initialMarkers is {nCam}(actualFrame, 2, nMarkers)
-                    % Need to use actualVideoFrameIdx for initialMarkers if its first dim is origNFrames
-                    % Assuming initialMarkers{nAnimator} is (origNFrames, 2, nMarkers)
-                    % If obj.initialMarkers{nAnimator} is indexed by actual video frame ID:
-                    if actualVideoFrameIdx <= size(obj.initialMarkers{nKPAnimator},1)
-                        iM(:) = permute(obj.initialMarkers{nKPAnimator}(actualVideoFrameIdx, :, :), [1, 3, 2]);
-                    else
-                        % Handle case where actualVideoFrameIdx might be out of bounds for initialMarkers
-                        % This might happen if framesToLabel selects frames beyond what initialMarkers covers
-                        % Or if initialMarkers was not properly populated for all original frames.
-                        % For safety, assume no initial marker if out of bounds.
-                        iM(:) = nan(size(cM)); % Or some other appropriate default
+                currentMarkerCoords = kpAnimator.getCurrentFramePositions(); % Get current 2D coords
+
+                for marker_idx = 1:obj.nMarkers
+                    % --- Check if marker is marked as invisible FIRST ---
+                    if obj.status(marker_idx, nKPAnimator, sessionFrameIdx) == obj.isInvisible
+                        % If invisible, ensure camPoints are NaN and skip other checks
+                        obj.camPoints(marker_idx, nKPAnimator, :, sessionFrameIdx) = nan;
+                        obj.handLabeled2D(marker_idx, nKPAnimator, :, sessionFrameIdx) = nan; % Also clear handLabeled
+                        continue; % Skip to the next marker for this camera view
                     end
-                    isDeleted = any(isnan(cM), 2);
-                    iM(isnan(iM)) = 0;
-                    cM(isnan(cM)) = 0;
-                    hasMoved = any(round(iM, 3) ~= round(cM, 3), 2);
-                    hasMoved = hasMoved & ~isDeleted;
-                    obj.status(isDeleted, nKPAnimator, sessionFrameIdx) = 0;
-                end
-                obj.status(hasMoved, nKPAnimator, sessionFrameIdx) = obj.isLabeled;
-                obj.camPoints(:, nKPAnimator, :, sessionFrameIdx) = currentMarkerCoords;
-                
-                movedByHand = hasMoved & kpAnimator.dragged(actualVideoFrameIdx, :)';
-                obj.handLabeled2D(movedByHand, nKPAnimator, 1, sessionFrameIdx) = currentMarkerCoords(movedByHand, 1);
-                obj.handLabeled2D(movedByHand, nKPAnimator, 2, sessionFrameIdx) = currentMarkerCoords(movedByHand, 2);
-            end
+                    % --- End check ---
+
+                    % --- Original logic (now only runs if not invisible) ---
+                    hasMoved = false; % Default
+                    currentCoord = currentMarkerCoords(marker_idx, :);
+                    isDeleted = any(isnan(currentCoord));
+
+                    if isempty(obj.initialMarkers)
+                        % Check only for non-NaN
+                        hasMoved = ~isDeleted;
+                        if ~hasMoved
+                            obj.status(marker_idx, nKPAnimator, sessionFrameIdx) = 0; % Unlabeled
+                        else
+                            obj.status(marker_idx, nKPAnimator, sessionFrameIdx) = obj.isLabeled;
+                        end
+                    else
+                        % Compare to initial markers
+                        initialCoord = nan(1, 2); % Default if index out of bounds
+                        if actualVideoFrameIdx <= size(obj.initialMarkers{nKPAnimator}, 1) && marker_idx <= size(obj.initialMarkers{nKPAnimator}, 3)
+                             temp_iM = permute(obj.initialMarkers{nKPAnimator}(actualVideoFrameIdx, :, marker_idx), [1, 3, 2]);
+                             if ~isempty(temp_iM)
+                                initialCoord = temp_iM;
+                             end
+                        end
+                        hasInitial = any(~isnan(initialCoord));
+
+                        if isDeleted
+                            obj.status(marker_idx, nKPAnimator, sessionFrameIdx) = 0; % Unlabeled
+                        elseif ~hasInitial
+                            obj.status(marker_idx, nKPAnimator, sessionFrameIdx) = obj.isLabeled;
+                        else
+                            initialCoordSafe = initialCoord; initialCoordSafe(isnan(initialCoordSafe)) = -inf; % Prevent NaN comparison issues
+                            currentCoordSafe = currentCoord; % Not NaN here
+                            hasMoved = any(round(initialCoordSafe, 3) ~= round(currentCoordSafe, 3));
+                            if hasMoved
+                                obj.status(marker_idx, nKPAnimator, sessionFrameIdx) = obj.isLabeled;
+                            else
+                                obj.status(marker_idx, nKPAnimator, sessionFrameIdx) = obj.isInitialized;
+                            end
+                        end
+                    end % end initialMarkers check
+
+                    % Update camPoints based on current marker coordinates (only if not invisible)
+                    obj.camPoints(marker_idx, nKPAnimator, :, sessionFrameIdx) = currentCoord;
+
+                    % Update handLabeled2D status (only if not invisible)
+                    % Note: kpAnimator.dragged uses actualVideoFrameIdx
+                    isNowConsideredLabeled = obj.status(marker_idx, nKPAnimator, sessionFrameIdx) == obj.isLabeled;
+                    wasDraggedInFrame = kpAnimator.dragged(actualVideoFrameIdx, marker_idx);
+
+                    if isNowConsideredLabeled && wasDraggedInFrame
+                        obj.handLabeled2D(marker_idx, nKPAnimator, :, sessionFrameIdx) = currentCoord;
+                    else
+                        obj.handLabeled2D(marker_idx, nKPAnimator, :, sessionFrameIdx) = nan; % Clear if not moved by hand or not labeled
+                    end
+                     % --- End Original logic ---
+                end % End loop over markers
+            end % End loop over cameras
         end
         
         function keyPressCallback(obj, source, eventdata)
@@ -1313,6 +1346,7 @@ classdef Label3D < Animator
                     if obj.autosave
                         obj.saveState()
                     end
+                    drawnow; % Force graphics update
                 case 'tab'
                     if wasShiftPressed
                         obj.selectNode(obj.selectedNode - 1)
@@ -1351,6 +1385,7 @@ classdef Label3D < Animator
                     if obj.autosave
                         obj.saveState()
                     end
+                    drawnow; % Force graphics update
                 case 'r'
                     reset(obj);
                 case 'pageup'
@@ -1374,6 +1409,35 @@ classdef Label3D < Animator
                         cb.status = obj.status(:, :, obj.frameInds(obj.frame));
                         obj.clipboard = cb;
                     end
+                case 'i' % --- Added case for toggling invisibility ---
+                    current_frame_idx = obj.frameInds(obj.frame);
+                    selected_node = obj.selectedNode;
+                    if isnan(selected_node) || selected_node < 1 || selected_node > obj.nMarkers
+                        fprintf('No valid node selected to toggle visibility.\n');
+                    else
+                        % Check status across all cams for consistency, use first as reference
+                        current_status_val = obj.status(selected_node, 1, current_frame_idx);
+
+                        if current_status_val == obj.isInvisible
+                            % Toggle from invisible to unlabeled
+                            obj.status(selected_node, :, current_frame_idx) = 0;
+                            % camPoints and points3D remain NaN, user needs to re-label
+                            fprintf('Node %s (%d) marked as unlabeled in frame %d.\n', obj.skeleton.joint_names{selected_node}, selected_node, current_frame_idx);
+                        else
+                            % Toggle from any other state to invisible
+                            obj.status(selected_node, :, current_frame_idx) = obj.isInvisible;
+                            obj.camPoints(selected_node, :, :, current_frame_idx) = nan;
+                            obj.points3D(selected_node, :, current_frame_idx) = nan;
+                            fprintf('Node %s (%d) marked as invisible in frame %d.\n', obj.skeleton.joint_names{selected_node}, selected_node, current_frame_idx);
+                        end
+
+                        obj.checkStatus(); % Re-evaluate status and camPoints based on changes
+                        obj.update(); % Update visuals
+                        if obj.autosave
+                            obj.saveState();
+                        end
+                        drawnow; % Force graphics update
+                    end % --- End added case ---
             end
             
             % Extend Animator callback function
@@ -2258,7 +2322,9 @@ classdef Label3D < Animator
             f = figure('Units', 'Normalized', 'pos', [0, 0, 0.5, 0.3], ...
                 'NumberTitle', 'off', 'ToolBar', 'none');
             ax = gca;
-            colormap([0, 0, 0; 0.5, 0.5, 0.5; 1, 1, 1])
+            % Current: colormap([0, 0, 0; 0.5, 0.5, 0.5; 1, 1, 1])
+            % New map: Black (unlabeled=0+1), Gray (initialized=1+1), White (labeled=2+1), Purple (invisible=3+1)
+            colormap(ax, [0, 0, 0; 0.5, 0.5, 0.5; 1, 1, 1; 0.7, 0, 0.7]);
             summary = zeros(size(obj.status, 1), size(obj.status, 3));
             summary(:) = mode(obj.status, 2);
             obj.statusAnimator = HeatMapAnimator(summary', 'Axes', ax);
@@ -2277,7 +2343,7 @@ classdef Label3D < Animator
         end
         
         function updateStatusAnimator(obj)
-            obj.checkStatus();
+            % obj.checkStatus(); % REMOVED redundant call
             summary = zeros(size(obj.status, 1), size(obj.status, 3));
             summary(:) = mode(obj.status, 2);
             obj.statusAnimator.img.CData = summary + 1;

@@ -9,7 +9,8 @@ Includes:
 - No reprojection of labeled points.
 - Pagination of camera views.
 - Smaller marker, skeleton-link sizes.
-- TODO: visibility toggle
+- Visibility toggle: i to toggle on/off.
+  - Flow: Label point --> i to remove --> i to re-add as unlabeled --> re-label.
 
 Current flow:
 1. Load 2D pose data, frames, and camera calibration parameters.
