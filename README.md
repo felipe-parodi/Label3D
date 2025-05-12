@@ -1,22 +1,22 @@
 # Label3D
 
-Modified Label3D to include:
-- Plotting of principal point
-- Ability to swap animal IDs in view
-- 2D data loading from .mat file
-- No reprojection of labeled points
-- Pagination of camera views
+A highly tailored version of Diego Aldarondo's [implementation](https://github.com/diegoaldarondo/Label3D).
+
+Includes:
+- Plotting of camera principal point.
+- Ability to swap animal IDs per view.
+- 2D data loading from .mat file.
+- No reprojection of labeled points.
+- Pagination of camera views.
+- Smaller marker, skeleton-link sizes.
 - TODO: visibility toggle
 
 Current flow:
 1. Load 2D pose data, frames, and camera calibration parameters.
 2. Correct IDs and poses as needed.
 3. Triangulate 3D poses.
-4. Save.
-
-## Installation
-
-See Diego Aldarondo's [implementation](https://github.com/diegoaldarondo/Label3D) for full installation instructions.
+4. Review.
+5. Save.
 
 ## Original Features
 1. Simultaneous viewing of any number of camera views
