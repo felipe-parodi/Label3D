@@ -445,8 +445,8 @@ classdef Label3D < Animator
                 set(obj.h{nCam}.img, 'ButtonDownFcn', @obj.clickImage);
 
                 % --- ADD SWAP ID BUTTON for this camera view ---
-                btnWidth = 0.08; % Normalized width
-                btnHeight = 0.035; % Normalized height for button text visibility
+                btnWidth = 0.04; % Normalized width - MODIFIED (was 0.05)
+                btnHeight = 0.02; % Normalized height for button text visibility - MODIFIED (was 0.025)
                 % Position button relative to AXES, not figure - Requires modification if axes position changes dynamically.
                 % For now, we'll place it relative to the figure's bottom-right, which might not align perfectly with the paged axes.
                 % A better approach would be to parent the button to a panel associated with the axes, or update button position in updateCameraViewLayout.
@@ -601,11 +601,11 @@ classdef Label3D < Animator
             obj.setUpKeypointTable();
 
             % --- Create Pagination Controls ---
-            buttonHeight = 0.04;
-            buttonWidth = 0.08;
-            infoWidth = 0.15;
+            buttonHeight = 0.02; % MODIFIED (was 0.025)
+            buttonWidth = 0.05;  % MODIFIED (was 0.06)
+            infoWidth = 0.08; % Adjusted to be proportional, was 0.10
             bottomMargin = 0.01;
-            spacing = 0.01;
+            spacing = 0.005; % Adjusted spacing slightly
             
             totalWidth = buttonWidth + spacing + infoWidth + spacing + buttonWidth;
             startX = (1 - totalWidth) / 2;
@@ -2001,12 +2001,12 @@ classdef Label3D < Animator
     
                     % Show and position the Swap ID button for this visible camera
                     if ~isempty(swapButtonHandle) && ishandle(swapButtonHandle)
-                        btnWidth = 0.08;  % Ensure these are defined or use obj properties if they become dynamic
-                        btnHeight = 0.035;
-                        % New position: Top-left of the current axes view
+                        btnWidth_swap = 0.04;  % Use new defined size for swap button
+                        btnHeight_swap = 0.02; % Use new defined size for swap button
+                        % New position: Bottom-left of the current axes view
                         btnX_new = currentPos(1) + 0.005; % Offset from left edge of axes
-                        btnY_new = currentPos(2) + currentPos(4) - btnHeight - 0.005; % Offset from top edge of axes
-                        set(swapButtonHandle, 'Position', [btnX_new, btnY_new, btnWidth, btnHeight], 'Visible', 'on');
+                        btnY_new = currentPos(2) + 0.005; % Offset from bottom edge of axes
+                        set(swapButtonHandle, 'Position', [btnX_new, btnY_new, btnWidth_swap, btnHeight_swap], 'Visible', 'on');
                     end
                 else
                      warning('Label3D:updateCameraViewLayout', 'Invalid localIndex %d for pagePositions (size %d). Skipping positioning for Cam %d.', localIndex, size(pagePositions,1), nCam);
