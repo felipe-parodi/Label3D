@@ -5,6 +5,7 @@ Modified Label3D to include:
 - Ability to swap animal IDs in view
 - 2D data loading from .mat file
 - No reprojection of labeled points
+- Pagination of camera views
 - TODO: visibility toggle
 
 Current flow:
