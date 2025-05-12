@@ -26,7 +26,7 @@ See Diego Aldarondo's [implementation](https://github.com/diegoaldarondo/Label3D
 5. Integration with `Animator` classes
 
 ## Usage
-Requires `Matlab 2019b`, `Matlab 2020a`, or `Matlab 2020b`
+Requires >= `Matlab 2019b`
 
 Label3D takes a cell arrays of structs of camera parameters as in
 https://github.com/spoonsso/DANNCE, a cell array of corresponding videos (h,w,c,N),
