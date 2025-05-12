@@ -172,6 +172,14 @@ classdef Label3D < Animator
         camPrefixMap % Map from Cam_XXX name to hardware ID prefix
         nAnimalsInSession % Number of animals being labeled in this session
 
+        % --- Camera View Pagination Properties ---
+        camerasPerPage = 6; % Number of camera views to show per page
+        currentCameraPage = 1; % Current page number (1-indexed)
+        totalPages = 1; % Total number of pages (calculated)
+        nextPageButton % Handle to the 'Next Page' button
+        prevPageButton % Handle to the 'Previous Page' button
+        pageInfoText   % Handle to the text displaying page info
+
         % ===========================
         % Useful Inherited properties
         % ===========================
@@ -413,13 +421,24 @@ classdef Label3D < Animator
                 obj.loadcamParams(obj.origCamParams);
             obj.cameraPoses = obj.getCameraPoses();
             
+            % --- Initialize Pagination ---
+            obj.currentCameraPage = 1;
+            if obj.nCams > 0 && obj.camerasPerPage > 0
+                obj.totalPages = ceil(obj.nCams / obj.camerasPerPage);
+            else
+                obj.totalPages = 1;
+            end
+            % --- End Initialization ---
+
             % Make the VideoAnimators
             if isempty(obj.videoPositions)
-                obj.videoPositions = obj.getPositions(obj.nCams);
+                % Pre-calculate all potential positions even if not used immediately
+                obj.videoPositions = obj.getPositions(obj.nCams); 
             end
             for nCam = 1 : obj.nCams
-                pos = obj.videoPositions(nCam, :);
-                obj.h{nCam} = VideoAnimator(videos{nCam}, 'Position', pos, 'frameInds', obj.frameInds); % Pass frameInds
+                % Create animator but don't set position here, let updateCameraViewLayout handle it
+                % pos = obj.videoPositions(nCam, :); % Position will be set later
+                obj.h{nCam} = VideoAnimator(videos{nCam}, 'Position', [0 0 0.1 0.1], 'Visible', 'off', 'frameInds', obj.frameInds); % Pass frameInds, start invisible and small
                 ax = obj.h{nCam}.Axes;
                 ax.Toolbar.Visible = 'off';
                 set(ax, 'XTick', [], 'YTick', []);
@@ -428,27 +447,30 @@ classdef Label3D < Animator
                 % --- ADD SWAP ID BUTTON for this camera view ---
                 btnWidth = 0.08; % Normalized width
                 btnHeight = 0.035; % Normalized height for button text visibility
-                % Position button at the bottom-right of the video panel
-                btnX = pos(1) + pos(3) - btnWidth - 0.005; % X: right edge - width - small margin
-                btnY = pos(2) + 0.005; % Y: bottom edge + small margin
-        
-                % Ensure button is within figure bounds (basic check, might need refinement)
-                btnX = max(0.001, btnX); % Keep slightly off edge
+                % Position button relative to AXES, not figure - Requires modification if axes position changes dynamically.
+                % For now, we'll place it relative to the figure's bottom-right, which might not align perfectly with the paged axes.
+                % A better approach would be to parent the button to a panel associated with the axes, or update button position in updateCameraViewLayout.
+                % Let's stick to figure-relative for simplicity first.
+                
+                % Estimate button position (this part is now less reliable due to pagination changing axes positions)
+                % We might need to adjust this or create buttons dynamically in updateCameraViewLayout
+                estAxPos = obj.videoPositions(nCam, :); % Use pre-calculated pos for estimation
+                btnX = estAxPos(1) + estAxPos(3) - btnWidth - 0.005; 
+                btnY = estAxPos(2) + 0.005; 
+                btnX = max(0.001, btnX); 
                 btnY = max(0.001, btnY);
-                % Ensure button doesn't overflow figure right/top if panel is too small (less likely for bottom-right)
-                % btnX = min(btnX, 1 - btnWidth - 0.001);
-                % btnY = min(btnY, 1 - btnHeight - 0.001);
 
 
                 uicontrol('Parent', obj.Parent, ... 
                           'Style', 'pushbutton', ...
                           'String', sprintf('Swap Cam%d IDs', nCam), ...
                           'Units', 'normalized', ...
-                          'Position', [btnX, btnY, btnWidth, btnHeight], ...
+                           'Position', [btnX, btnY, btnWidth, btnHeight], ... % POSITIONING NEEDS REVIEW/REWORK with pagination
                           'Callback', @(~,~) obj.swapAnimalIDsInView(nCam), ...
                           'Tag', sprintf('SwapButtonCam%d', nCam), ...
                           'TooltipString', sprintf('Swap Animal IDs for camera %d in current frame', nCam), ...
-                          'FontSize', 7); % Smaller font for compact button
+                          'FontSize', 7, ...
+                          'Visible', 'off'); % Start hidden, manage visibility in updateCameraViewLayout
             end
             
             % --- Add Camera Name Overlay & Principal Point ---
@@ -531,10 +553,10 @@ classdef Label3D < Animator
             for nCam = 1 : obj.nCams
                 obj.h{obj.nCams + nCam} = ...
                     DraggableKeypoint2DAnimator(obj.markers{nCam}, ...
-                    obj.skeleton, 'Axes', obj.h{nCam}.Axes, ...
+                    obj.skeleton, 'Axes', obj.h{nCam}.Axes, ... % Reuse axes from VideoAnimator
                     'visibleDragPoints', obj.visibleDragPoints, ...
                     'DragPointColor', obj.DragPointColor);
-                ax = obj.h{obj.nCams + nCam}.Axes;
+                ax = obj.h{obj.nCams + nCam}.Axes; % Axes are already invisible from VideoAnimator setup
                 ax.Toolbar.Visible = 'off';
                 xlim(ax, [1 obj.ImageSize(nCam, 2)])
                 ylim(ax, [1 obj.ImageSize(nCam, 1)])
@@ -577,7 +599,35 @@ classdef Label3D < Animator
             
             % Set up the keypoint table figure
             obj.setUpKeypointTable();
+
+            % --- Create Pagination Controls ---
+            buttonHeight = 0.04;
+            buttonWidth = 0.08;
+            infoWidth = 0.15;
+            bottomMargin = 0.01;
+            spacing = 0.01;
             
+            totalWidth = buttonWidth + spacing + infoWidth + spacing + buttonWidth;
+            startX = (1 - totalWidth) / 2;
+
+            obj.prevPageButton = uicontrol('Parent', obj.Parent, 'Style', 'pushbutton', ...
+                                          'String', '< Prev', 'Units', 'normalized', ...
+                                          'Position', [startX, bottomMargin, buttonWidth, buttonHeight], ...
+                                          'Callback', @obj.prevPageCallback, 'Tag', 'PrevPageButton');
+            
+            obj.pageInfoText = uicontrol('Parent', obj.Parent, 'Style', 'text', ...
+                                         'String', sprintf('Page %d / %d', obj.currentCameraPage, obj.totalPages), ...
+                                         'Units', 'normalized', ...
+                                         'Position', [startX + buttonWidth + spacing, bottomMargin, infoWidth, buttonHeight], ...
+                                         'Tag', 'PageInfoText');
+
+            obj.nextPageButton = uicontrol('Parent', obj.Parent, 'Style', 'pushbutton', ...
+                                          'String', 'Next >', 'Units', 'normalized', ...
+                                          'Position', [startX + buttonWidth + spacing + infoWidth + spacing, bottomMargin, buttonWidth, buttonHeight], ...
+                                          'Callback', @obj.nextPageCallback, 'Tag', 'NextPageButton');
+            % --- End Pagination Controls ---
+
+
             % --- Disable Default Data Cursor Mode and Limit Interactions (like original) --- 
             % Remove the explicit disabling of datacursormode, as disableDefaultInteractivity handles it.
             % dcm_obj = datacursormode(obj.Parent); 
@@ -596,6 +646,10 @@ classdef Label3D < Animator
                 end
             end
             % --- End Interaction Limiting --- 
+
+            % --- Initial Layout Update ---
+            obj.updateCameraViewLayout(); % Call this to set initial visibility and positions
+            % --- End Initial Layout Update ---
         end
         
         function pos = positionFromNRows(obj, views, nRows)
@@ -1871,8 +1925,148 @@ classdef Label3D < Animator
         fprintf('ID Swap complete for Camera %d, GUI Frame %d.\n', cameraIndex, obj.frame);
     end % End of swapAnimalIDsInView method
 
-    end % End of PUBLIC methods block (this end was already here for the main public methods)
+    % --- Camera View Pagination Methods ---
+    function updateCameraViewLayout(obj)
+        startIndex = (obj.currentCameraPage - 1) * obj.camerasPerPage + 1;
+        endIndex = min(obj.currentCameraPage * obj.camerasPerPage, obj.nCams);
+
+        if obj.nCams == 0 % Handle no cameras case first
+            % Hide all swap buttons if they exist
+            swapButtons = findall(obj.Parent, 'Type', 'uicontrol', 'Tag', 'SwapButtonCam*');
+            set(swapButtons, 'Visible', 'off'); % Keep hiding buttons based on visibility logic
+
+            % Update page info text and button states
+            if isvalid(obj.pageInfoText), set(obj.pageInfoText, 'String', 'Page 0 / 0'); end
+            if isvalid(obj.prevPageButton), set(obj.prevPageButton, 'Enable', 'off'); end
+            if isvalid(obj.nextPageButton), set(obj.nextPageButton, 'Enable', 'off'); end
+            return;
+        end
+
+        pageIndices = startIndex:endIndex;
+        numViewsThisPage = numel(pageIndices);
+         if numViewsThisPage <= 0 % Should generally not happen if nCams > 0
+            pageIndices = []; % Ensure it's empty
+         end
+        
+        % Only calculate positions if there are views on this page
+        if numViewsThisPage > 0
+            pagePositions = obj.getPositions(numViewsThisPage);
+        else
+             pagePositions = zeros(0,4); % Empty array if no views
+        end
+
+        fprintf('-- updateCameraViewLayout: Page %d -> Indices %s (%d views) --\\n', obj.currentCameraPage, mat2str(pageIndices), numViewsThisPage); % DEBUG
+
+        for nCam = 1 : obj.nCams
+            % Get the shared axes
+            % Check if the handle exists and is valid before accessing Axes
+            if numel(obj.h) >= nCam && isvalid(obj.h{nCam}) && isprop(obj.h{nCam},'Axes') && ishandle(obj.h{nCam}.Axes)
+                videoAx = obj.h{nCam}.Axes;
+            else
+                warning('Label3D:updateCameraViewLayout', 'Could not get valid axes for animator index %d. Skipping.', nCam);
+                continue; % Skip this camera if axes are invalid
+            end
+            
+            % Find SwapID button for this camera
+            swapButtonTag = sprintf('SwapButtonCam%d', nCam);
+            swapButtonHandle = findall(obj.Parent, 'Type', 'uicontrol', 'Tag', swapButtonTag);
+
+            isCamOnCurrentPage = ismember(nCam, pageIndices);
+
+            if isCamOnCurrentPage
+                [~, localIndex] = ismember(nCam, pageIndices);
+                % Ensure localIndex is valid before accessing pagePositions
+                if localIndex > 0 && localIndex <= size(pagePositions, 1)
+                    currentPos = pagePositions(localIndex, :);
     
+                    fprintf('  Cam %d: Setting Position [%.2f %.2f %.2f %.2f] (Visible ON)\\n', nCam, currentPos); % DEBUG
+                    set(videoAx, 'Position', currentPos, 'Visible', 'on'); % Ensure axes are visible
+    
+                    % Ensure VideoAnimator content is visible
+                    if isfield(obj.h{nCam}, 'img') && ishandle(obj.h{nCam}.img)
+                         set(obj.h{nCam}.img, 'Visible', 'on');
+                    end
+    
+                    % Ensure DraggableKeypoint2DAnimator points & segments are visible
+                    kpAnimatorIndex = obj.nCams + nCam;
+                    if numel(obj.h) >= kpAnimatorIndex && isvalid(obj.h{kpAnimatorIndex}) && isa(obj.h{kpAnimatorIndex}, 'DraggableKeypoint2DAnimator')
+                        dkpa = obj.h{kpAnimatorIndex};
+                        if isprop(dkpa, 'points') && ishandle(dkpa.points)
+                            set(dkpa.points, 'Visible', 'on');
+                        end
+                        if isprop(dkpa, 'segments') && all(ishandle(dkpa.segments)) % Check if segments is an array of handles
+                             set(dkpa.segments(ishandle(dkpa.segments)), 'Visible', 'on'); % Set only valid handles
+                        end
+                    end
+    
+                    % Show and position the Swap ID button for this visible camera
+                    if ~isempty(swapButtonHandle) && ishandle(swapButtonHandle)
+                        btnWidth = 0.08;
+                        btnHeight = 0.035;
+                        btnX = currentPos(1) + currentPos(3) - btnWidth - 0.005;
+                        btnY = currentPos(2) + 0.005;
+                        set(swapButtonHandle, 'Position', [btnX, btnY, btnWidth, btnHeight], 'Visible', 'on');
+                    end
+                else
+                     warning('Label3D:updateCameraViewLayout', 'Invalid localIndex %d for pagePositions (size %d). Skipping positioning for Cam %d.', localIndex, size(pagePositions,1), nCam);
+                end
+            else
+                fprintf('  Cam %d: Setting Position OFF-SCREEN (Visible ON)\\n', nCam); % DEBUG
+                % --- MODIFICATION: Move axes off-screen instead of hiding ---
+                set(videoAx, 'Position', obj.hiddenAxesPos, 'Visible', 'on'); % Keep Visible 'on'
+                % No need to explicitly hide contents if axes are moved.
+
+                % --- Hide Swap ID button ---
+                if ~isempty(swapButtonHandle) && ishandle(swapButtonHandle)
+                    set(swapButtonHandle, 'Visible', 'off'); % Still hide the button
+                end
+            end
+        end
+
+        % Update page info text
+        if isvalid(obj.pageInfoText)
+            set(obj.pageInfoText, 'String', sprintf('Page %d / %d', obj.currentCameraPage, obj.totalPages));
+        end
+
+        % Update Next/Prev button states
+        if isvalid(obj.prevPageButton)
+            if obj.currentCameraPage == 1
+                set(obj.prevPageButton, 'Enable', 'off');
+            else
+                set(obj.prevPageButton, 'Enable', 'on');
+            end
+        end
+        if isvalid(obj.nextPageButton)
+            if obj.currentCameraPage == obj.totalPages
+                set(obj.nextPageButton, 'Enable', 'off');
+            else
+                set(obj.nextPageButton, 'Enable', 'on');
+            end
+        end
+         % Add a drawnow here to ensure positioning changes take effect
+         drawnow;
+    end
+
+    function nextPageCallback(obj, ~, ~)
+        if obj.currentCameraPage < obj.totalPages
+            obj.currentCameraPage = obj.currentCameraPage + 1;
+            obj.updateCameraViewLayout();
+            obj.update(); % Refresh drawing on newly visible axes
+        end
+    end
+
+    function prevPageCallback(obj, ~, ~)
+        if obj.currentCameraPage > 1
+            obj.currentCameraPage = obj.currentCameraPage - 1;
+            obj.updateCameraViewLayout(); % This now calls drawnow internally
+            % drawnow; % Removed extra drawnow here, as it's in updateCameraViewLayout
+            obj.update(); % Refresh drawing on newly visible axes
+        end
+    end
+    % --- End Pagination Methods ---
+
+    end % End of PUBLIC methods block (this end was already here for the main public methods)
+
     methods (Access = private)
         function reset(obj)
             % reset frameInds to 1 : nFrames
