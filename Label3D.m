@@ -557,7 +557,8 @@ classdef Label3D < Animator
                     obj.skeleton, 'Axes', obj.h{nCam}.Axes, ... % Reuse axes from VideoAnimator
                     'visibleDragPoints', obj.visibleDragPoints, ...
                     'DragPointColor', obj.DragPointColor, ...
-                    'MarkerSize', newMarkerSize); % <-- Pass the parameter here
+                    'MarkerSize', newMarkerSize, ...
+                    'LineWidth', 1); % <-- Added LineWidth here
                 ax = obj.h{obj.nCams + nCam}.Axes; % Axes are already invisible from VideoAnimator setup
                 ax.Toolbar.Visible = 'off';
                 xlim(ax, [1 obj.ImageSize(nCam, 2)])

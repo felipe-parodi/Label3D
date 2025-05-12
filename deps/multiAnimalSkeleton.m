@@ -66,8 +66,49 @@ function newSkeleton = multiAnimalSkeleton(baseSkeleton, nAnimals)
               'Mismatch between the number of generated segment colors and segment indices.');
     end
 
-    %uniqueColors = customColorMap(nAnimals);
-    %markerColors = repelem(uniqueColors, nMarkers , 1);
-    %newSkeleton.marker_colors = markerColors;
+    % --- START: Generate Per-Marker Colors ---
+    base_joint_names = baseSkeleton.joint_names;
+    nBaseMarkers = numel(base_joint_names);
+
+    % Find indices for left, right, and center keypoints
+    left_indices = find(contains(base_joint_names, 'left_'));
+    right_indices = find(contains(base_joint_names, 'right_'));
+    nose_index = find(strcmp(base_joint_names, 'nose'));
+    % Basic validation
+    if isempty(nose_index) || numel(left_indices) ~= 8 || numel(right_indices) ~= 8 || nBaseMarkers ~= 17
+        warning('multiAnimalSkeleton:UnexpectedJoints', ...
+                'Expected COCO-17 structure (1 nose, 8 left, 8 right) not found. Using default white markers.');
+        base_marker_colors = repmat([1, 1, 1], nBaseMarkers, 1); % Default to white
+    else
+        % Define color gradients
+        left_colors = [linspace(0.6, 0.0, 8)', linspace(0.8, 0.0, 8)', linspace(1.0, 0.8, 8)'];
+        right_colors = [linspace(1.0, 0.8, 8)', linspace(0.6, 0.0, 8)', linspace(0.6, 0.0, 8)'];
+        center_color = [1.0, 1.0, 0.0]; % Yellow for nose
+
+        % Initialize base color array
+        base_marker_colors = zeros(nBaseMarkers, 3);
+
+        % Assign colors based on indices
+        % We need to ensure the gradient follows the typical top-to-bottom order
+        % COCO-17 order: nose, l_eye, r_eye, l_ear, r_ear, l_shoulder, r_shoulder, ... l_ankle, r_ankle
+        % The find() indices might not be sorted anatomically, so we map carefully
+        left_order_map = [2, 4, 6, 8, 10, 12, 14, 16]; % Indices in base_joint_names for left parts top->bottom
+        right_order_map = [3, 5, 7, 9, 11, 13, 15, 17]; % Indices in base_joint_names for right parts top->bottom
+
+        for i = 1:8
+             base_marker_colors(left_order_map(i), :) = left_colors(i, :);
+             base_marker_colors(right_order_map(i), :) = right_colors(i, :);
+        end
+        base_marker_colors(nose_index, :) = center_color;
+    end
+
+    % Replicate for nAnimals
+    markerColors = repmat(base_marker_colors, nAnimals, 1);
+    newSkeleton.marker_colors = markerColors;
+    % --- END: Generate Per-Marker Colors ---
+
+    %uniqueColors = customColorMap(nAnimals); % Original commented code
+    %markerColors = repelem(uniqueColors, nMarkers , 1); % Original commented code
+    %newSkeleton.marker_colors = markerColors; % Original commented code
 end
 
