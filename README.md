@@ -11,6 +11,7 @@ Includes:
 - Smaller marker, skeleton-link sizes.
 - Visibility toggle: i to toggle on/off.
   - Flow: Label point --> i to remove --> i to re-add as unlabeled --> re-label.
+- 2D data export to COCO format.
 
 Current flow:
 1. Load 2D pose data, frames, and camera calibration parameters.

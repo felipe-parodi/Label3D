@@ -330,7 +330,6 @@ def l3d_to_coco(l3d_mat_path, base_skeleton_mat_path, output_coco_path):
                             print(f"  SKIPPING annotation: num_labeled_kps_for_instance is 0.")
                         continue
 
-
                 annotation_id_counter += 1
                 
                 if visible_xs:

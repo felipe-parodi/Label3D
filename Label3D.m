@@ -1112,40 +1112,54 @@ classdef Label3D < Animator
             obj.update()
         end
         
-        function clickImage(obj, ~, ~)
-            % Callback to image clicks (but not on nodes)
-            % Pull out clicked point coordinate in image coordinates
-            pt = zeros(obj.nCams, 2);
-            for i = 1 : obj.nCams
-                pt(i, :) = obj.h{i}.img.Parent.CurrentPoint(1, 1 : 2);
+        function clickImage(obj, source, ~) % source is the image handle
+            fig = obj.Parent;
+            clickedAxes = source.Parent; % Axes of the clicked image
+
+            % Find which camera this axes belongs to
+            clickedCamGlobalIdx = NaN;
+            for camIdx = 1:obj.nCams
+                if numel(obj.h) >= camIdx && ...
+                   isvalid(obj.h{camIdx}) && isprop(obj.h{camIdx}, 'Axes') && ...
+                   isequal(obj.h{camIdx}.Axes, clickedAxes)
+                    clickedCamGlobalIdx = camIdx;
+                    break;
+                end
             end
-            
-            % Pull out clicked point in figure coordinates.
-            fpt = obj.Parent.CurrentPoint;
-            [goodX, goodY] = deal(zeros(obj.nCams, 1));
-            for nCam = 1 : obj.nCams
-                pos = obj.h{nCam}.Position;
-                goodX(nCam) = pos(1) <= fpt(1) && fpt(1) < (pos(1) + pos(3));
-                goodY(nCam) = pos(2) <= fpt(2) && fpt(2) < (pos(2) + pos(4));
-            end
-            cam = find(goodX & goodY);
-            
-            % Throw a warning if there are more than one good camera.
-            if numel(cam) > 1
-                warning(['Click is in multiple images. ' ...
-                    'Please zoom image axes such that they are '...
-                    'non-overlapping. To zoom out fully in all images, press "o".'])
+
+            if isnan(clickedCamGlobalIdx)
+                warning('Label3D:clickImage', 'Could not identify clicked camera from axes.');
                 return;
             end
             
-            % Update the currently selected node
+            clickPtAxes = get(clickedAxes, 'CurrentPoint');
+            clickedX = clickPtAxes(1,1);
+            clickedY = clickPtAxes(1,2);
+
+            % --- Existing Left-Click Logic for Labeling ---
             selectedNodeIndex = obj.selectedNode;
-            obj.h{cam + obj.nCams}.points.XData(selectedNodeIndex) = pt(cam, 1);
-            obj.h{cam + obj.nCams}.points.YData(selectedNodeIndex) = pt(cam, 2);
-            obj.h{cam + obj.nCams}.dragged(obj.frameInds(obj.frame), obj.selectedNode) = true;
-            obj.h{cam + obj.nCams}.update();
-            obj.checkStatus();
-            obj.update();
+            
+            if isnan(selectedNodeIndex) || selectedNodeIndex < 1 || selectedNodeIndex > obj.nMarkers
+                warning('Label3D:clickImage', 'No valid node selected for labeling (selectedNode: %s). Current max is %d.', mat2str(selectedNodeIndex), obj.nMarkers);
+                return;
+            end
+
+            dka_label = obj.h{obj.nCams + clickedCamGlobalIdx};
+            
+            dka_label.points.XData(selectedNodeIndex) = clickedX;
+            dka_label.points.YData(selectedNodeIndex) = clickedY;
+            
+            if obj.frame > 0 && obj.frame <= numel(obj.frameInds)
+                actualVideoFrameIdx = obj.frameInds(obj.frame);
+                dka_label.dragged(actualVideoFrameIdx, selectedNodeIndex) = true;
+            else
+                 warning('Label3D:clickImage', 'Current GUI frame index obj.frame (%d) is out of bounds for obj.frameInds.', obj.frame);
+                 return;
+            end
+            
+            dka_label.update(); 
+            obj.checkStatus();  
+            obj.update();       
         end
         
         function pt = getPointTrack(obj, frame, jointId, camIds)
@@ -1459,7 +1473,57 @@ classdef Label3D < Animator
                         obj.saveState();
                     end
                     drawnow; 
+                case 'm' % New case for deleting instance via selected node
+                    if isnan(obj.selectedNode) || obj.selectedNode < 1 || obj.selectedNode > obj.nMarkers
+                        fprintf('Label3D: ''m'' key - No node selected to identify an instance for deletion.\n');
+                        return;
+                    end
 
+                    activeCameraGlobalIdx = NaN;
+                    % Try to find the camera view based on which DKA has the current obj.selectedNode
+                    draggableAnimators = obj.h(obj.nCams + 1 : 2 * obj.nCams);
+                    for i = 1:numel(draggableAnimators)
+                        dka = draggableAnimators{i};
+                        % Ensure dka and selectedNode property are valid before accessing
+                        if isvalid(dka) && isprop(dka, 'selectedNode') && isscalar(dka.selectedNode) && ~isnan(dka.selectedNode) && dka.selectedNode == obj.selectedNode
+                            % Check if this DKA is for a camera view that is currently visible on the page.
+                            % This helps disambiguate if multiple DKAs somehow shared a selected node (though unlikely).
+                            startIndex = (obj.currentCameraPage - 1) * obj.camerasPerPage + 1;
+                            endIndex = min(obj.currentCameraPage * obj.camerasPerPage, obj.nCams);
+                            pageIndices = startIndex:endIndex;
+                            if ismember(i, pageIndices) % 'i' here is the camera index
+                                activeCameraGlobalIdx = i;
+                                fprintf('Label3D: ''m'' key - Target camera (Cam %d) identified from DKA selection for node %d.\n', activeCameraGlobalIdx, obj.selectedNode);
+                                break;
+                            end
+                        end
+                    end
+
+                    % If no DKA on the current page claims the selectedNode, use mouse position as fallback
+                    if isnan(activeCameraGlobalIdx)
+                        currentActiveCamByMouse = obj.privaten_determineActiveCameraViewByMouse();
+                        if ~isnan(currentActiveCamByMouse)
+                            activeCameraGlobalIdx = currentActiveCamByMouse;
+                            fprintf('Label3D: ''m'' key - Target camera (Cam %d) identified by mouse position for node %d.\n', activeCameraGlobalIdx, obj.selectedNode);
+                        else
+                            fprintf('Label3D: ''m'' key - Could not determine active camera view for deletion of selected node %d.\n', obj.selectedNode);
+                            fprintf('             Ensure mouse is over the intended camera view or click a keypoint in that view first.\n');
+                            return;
+                        end
+                    end
+                    
+                    if obj.nAnimalsInSession > 0 && obj.nMarkers > 0
+                        keypointsPerAnimal = obj.nMarkers / obj.nAnimalsInSession;
+                        if mod(keypointsPerAnimal,1) == 0 && keypointsPerAnimal > 0
+                            animalInstanceSessionIdx = ceil(obj.selectedNode / keypointsPerAnimal);
+                            guiFrameIdx = obj.frame; % Use current GUI frame
+                            obj.deleteInstanceInView(animalInstanceSessionIdx, activeCameraGlobalIdx, guiFrameIdx);
+                        else
+                            warning('Label3D:''m'' key - Cannot determine animal instance. nMarkers (%d) not cleanly divisible by nAnimalsInSession (%d).', obj.nMarkers, obj.nAnimalsInSession);
+                        end
+                    else
+                        warning('Label3D:''m'' key - nAnimalsInSession or nMarkers is zero. Cannot determine instance.');
+                    end
             end
             
             % Extend Animator callback function
@@ -2347,6 +2411,85 @@ classdef Label3D < Animator
                 warning('Label3D:determineActiveCam', 'Mouse over multiple camera views. Ambiguous for "i" key.');
             end
         end
+
+        function deleteInstanceInView(obj, animalInstanceSessionIdx, cameraGlobalIdx, guiFrameIdx)
+            % Deletes all keypoints for a given animal instance in a specific camera view
+            % for the current GUI frame.
+
+            if obj.nAnimalsInSession == 0
+                warning('Label3D:deleteInstanceInView', 'nAnimalsInSession is 0. Cannot determine instance.');
+                return;
+            end
+            if obj.nMarkers == 0
+                warning('Label3D:deleteInstanceInView', 'nMarkers is 0. No markers to delete.');
+                return;
+            end
+            
+            keypointsPerAnimal = obj.nMarkers / obj.nAnimalsInSession;
+            if mod(keypointsPerAnimal, 1) ~= 0 || keypointsPerAnimal <= 0
+                warning('Label3D:deleteInstanceInView', 'Cannot determine keypoints per animal. nMarkers: %d, nAnimalsInSession: %d', obj.nMarkers, obj.nAnimalsInSession);
+                return;
+            end
+
+            % Determine the range of global marker indices for this animal instance
+            marker_start_idx = (animalInstanceSessionIdx - 1) * keypointsPerAnimal + 1;
+            marker_end_idx = animalInstanceSessionIdx * keypointsPerAnimal;
+
+            if marker_start_idx < 1 || marker_end_idx > obj.nMarkers || marker_start_idx > marker_end_idx
+                warning('Label3D:deleteInstanceInView', 'Calculated marker indices [%d-%d] are out of bounds for nMarkers=%d.', marker_start_idx, marker_end_idx, obj.nMarkers);
+                return;
+            end
+            
+            % Ensure guiFrameIdx is valid for camPoints and status arrays
+            if guiFrameIdx < 1 || guiFrameIdx > size(obj.camPoints, 4) % Assuming 4th dim is frames
+                 warning('Label3D:deleteInstanceInView', 'GUI frame index %d is out of bounds for camPoints/status arrays.', guiFrameIdx);
+                return;
+            end
+
+
+            fprintf('Label3D: Deleting instance %d (markers %d-%d) in Camera %d, GUI Frame %d.\n', ...
+                    animalInstanceSessionIdx, marker_start_idx, marker_end_idx, cameraGlobalIdx, guiFrameIdx);
+
+            % Set camPoints to NaN for the specified markers, camera, and frame
+            obj.camPoints(marker_start_idx:marker_end_idx, cameraGlobalIdx, :, guiFrameIdx) = nan;
+            
+            % Set status to 0 (unlabeled)
+            obj.status(marker_start_idx:marker_end_idx, cameraGlobalIdx, guiFrameIdx) = 0;
+
+            % Update the DraggableKeypoint2DAnimator's internal marker data
+            dka_idx = obj.nCams + cameraGlobalIdx;
+            if dka_idx <= numel(obj.h) && ...
+               isvalid(obj.h{dka_idx}) && ...
+               isa(obj.h{dka_idx}, 'DraggableKeypoint2DAnimator')
+                
+                dka = obj.h{dka_idx};
+                % dka.markers is (nFramesInSession, 2, nTotalMarkers)
+                if guiFrameIdx <= size(dka.markers, 1)
+                    dka.markers(guiFrameIdx, :, marker_start_idx:marker_end_idx) = nan;
+                    % Directly update the DKA's visual points for the current frame
+                    current_xdata = dka.points.XData;
+                    current_ydata = dka.points.YData;
+                    current_xdata(marker_start_idx:marker_end_idx) = nan;
+                    current_ydata(marker_start_idx:marker_end_idx) = nan;
+                    dka.points.XData = current_xdata;
+                    dka.points.YData = current_ydata;
+                    dka.update(); % Call DKA's own update to refresh its visuals if necessary
+                else
+                    warning('Label3D:deleteInstanceInView', 'GUI frame index %d out of bounds for DKA markers for Cam %d.', guiFrameIdx, cameraGlobalIdx);
+                end
+            else
+                warning('Label3D:deleteInstanceInView', 'Could not find or access DraggableKeypoint2DAnimator for Camera %d.', cameraGlobalIdx);
+            end
+
+            obj.checkStatus(); % Update status based on changes (will read from DKAs)
+            obj.update();      % Refresh display of all animators (will update DKAs from obj.camPoints)
+
+            if obj.autosave
+                obj.saveState();
+            end
+            drawnow;
+        end
+
     end % End of methods (Access = private) block
     
     % --- Misplaced function removed from here, it is now correctly placed above ---
