@@ -1020,60 +1020,60 @@ classdef Label3D < Animator
         end % THIS end closes the triangulateLabeledPoints function
         
         function reprojectPoints(obj, frame)
-            % Find the labeled joints and corresponding cameras
-            [~, jointIds] = obj.getLabeledJoints(frame);
-            
-            % Reproject the world coordinates for the labeled joints to
-            % each camera and store in the camPoints
+            % Find joints that have valid 3D data in this frame
+            valid3D = ~any(isnan(obj.points3D(:, :, frame)), 2);
+            jointIdsWith3D = find(valid3D); % Indices of joints with valid 3D points
+
+            if isempty(jointIdsWith3D)
+                return; % Nothing to reproject
+            end
+
+            worldPointsToReproject = obj.points3D(jointIdsWith3D, :, frame);
+
+            % Reproject the world coordinates for the joints with valid 3D
+            % to each camera and selectively store in camPoints, respecting isInvisible status
             for nCam = 1 : obj.nCams
                 camParam = obj.cameraParams{nCam};
-                % Original logic for rotation and translation:
-                rotation = obj.orientations{nCam}'; % R_c_w' = R_w_c
-                translation = camParam.TranslationVectors; % T_c_w (as stored in cameraParams)
-                worldPoints = obj.points3D(jointIds, :, frame);
-                if ~isempty(worldPoints)
-                    if obj.undistortedImages
-                        % THE ACTUAL REPROJECTION
-                        projectedImagePoints = ...
-                            worldToImage(camParam, rotation, translation, ...
-                            worldPoints);
-                    else
-                        projectedImagePoints = ...
-                            worldToImage(camParam, rotation, translation, ...
-                            worldPoints, 'ApplyDistortion', true);
-                    end
-                    % Check if the point is marked as invisible for this camera view
-                    for idx = 1:numel(jointIds)
-                        jointId = jointIds(idx);
-                        if obj.status(jointId, nCam, frame) == obj.isInvisible
-                            obj.camPoints(jointId, nCam, :, frame) = nan;
-                        else
-                            obj.camPoints(jointId, nCam, :, frame) = projectedImagePoints(idx, :);
-                        end
-                    end
+                rotation = obj.orientations{nCam}';
+                translation = camParam.TranslationVectors;
 
-                    % --- BEGIN ADDED PRINT STATEMENTS ---
-                    % if ~isempty(projectedImagePoints)
-                    %     fprintf('--- Reprojection Details for Frame %d, Camera %d ---\\n', frame, nCam); 
-                    %     for jIdx = 1:numel(jointIds)
-                    %         currentJointId = jointIds(jIdx);
-                    %         % Ensure we only try to access valid rows in worldPoints and projectedImagePoints
-                    %         if jIdx <= size(worldPoints, 1) && jIdx <= size(projectedImagePoints, 1)
-                    %             fprintf('  Joint ID: %d\\n', currentJointId);   
-                    %             fprintf('    Input 3D Point (worldPoints(%d, :)): [%.4f, %.4f, %.4f]\\n', ...
-                    %                 jIdx, worldPoints(jIdx, 1), worldPoints(jIdx, 2), worldPoints(jIdx, 3)); 
-                    %             fprintf('    Output 2D Reprojected Point (projectedImagePoints(%d, :)): [%.4f, %.4f]\\n', ...
-                    %                 jIdx, projectedImagePoints(jIdx, 1), projectedImagePoints(jIdx, 2));
-                    %         else
-                    %             fprintf('    Skipping print for joint index %d due to inconsistent sizes (worldPoints: %d, projected: %d rows)\\n', ...
-                    %                 jIdx, size(worldPoints,1), size(projectedImagePoints,1));
-                    %         end
-                    %     end
-                    %     fprintf('----------------------------------------------------\\n');
-                    % end
-                    % --- END ADDED PRINT STATEMENTS ---
-                end
-            end
+                if ~isempty(worldPointsToReproject)
+                    applyDistortionFlag = ~obj.undistortedImages; % Set flag based on property
+
+                    % Perform reprojection for all valid 3D points at once
+                    projectedImagePointsAll = worldToImage(camParam, rotation, translation, ...
+                                                          worldPointsToReproject, 'ApplyDistortion', applyDistortionFlag);
+
+                    % Now, selectively update camPoints based on status
+                    for idx = 1:numel(jointIdsWith3D)
+                        currentJointId = jointIdsWith3D(idx);
+                        % Assuming 'frame' passed to reprojectPoints is the actual video frame index.
+                        % We need the session frame index to access obj.status and obj.camPoints correctly.
+                        sessionFrameIdx = find(obj.frameInds == frame, 1);
+
+                        if isempty(sessionFrameIdx)
+                            warning('Label3D:reprojectPoints', 'Could not find session frame index for actual frame %d. Skipping status check for this frame in reprojection.', frame);
+                            % If sessionFrameIdx is not found, we cannot reliably check status or assign camPoints for this frame.
+                            continue; % Skip to the next joint for this camera view
+                        end
+                        
+                        currentStatus = obj.status(currentJointId, nCam, sessionFrameIdx);
+                        
+                        % Only update camPoints if the status is NOT invisible
+                        if currentStatus ~= obj.isInvisible
+                            % Ensure projectedImagePointsAll has the expected size
+                            if idx <= size(projectedImagePointsAll, 1)
+                                obj.camPoints(currentJointId, nCam, :, sessionFrameIdx) = projectedImagePointsAll(idx, :);
+                            else
+                                warning('Label3D:reprojectPoints', 'Mismatch between jointIdsWith3D count and projected points for frame %d (session frame %d), cam %d, joint %d.', frame, sessionFrameIdx, nCam, currentJointId);
+                            end
+                        else
+                            % If status IS invisible, ensure camPoints remains NaN
+                            obj.camPoints(currentJointId, nCam, :, sessionFrameIdx) = [NaN, NaN];
+                        end
+                    end % End loop through joints for this camera
+                end % End check if worldPointsToReproject is not empty
+            end % End loop through cameras
         end
         
         function resetFrame(obj)
@@ -1091,6 +1091,7 @@ classdef Label3D < Animator
             obj.checkStatus();
             obj.update()
         end
+        
         
         function resetMarker(obj)
             % Delete the selected nodes if they exist
@@ -1419,35 +1420,66 @@ classdef Label3D < Animator
                         cb.status = obj.status(:, :, obj.frameInds(obj.frame));
                         obj.clipboard = cb;
                     end
-                case 'i' % --- Added case for toggling invisibility ---
-                    current_frame_idx = obj.frameInds(obj.frame);
+                case 'i' % --- MODIFIED case for toggling invisibility (View-Specific) ---
+                    sessionFrameIdx = obj.frame; % GUI frame index (1 to numel(obj.frameInds))
+                    actualVideoFrameIdx = obj.frameInds(sessionFrameIdx); % Actual video frame number, if needed for other logic later
                     selected_node = obj.selectedNode;
+
                     if isnan(selected_node) || selected_node < 1 || selected_node > obj.nMarkers
                         fprintf('No valid node selected to toggle visibility.\n');
+                        return; % Use return instead of continue in a switch-case
+                    end
+
+                    % Determine target camera view based on mouse position
+                    targetCameraIdx = obj.privaten_determineActiveCameraViewByMouse(); 
+                    if isnan(targetCameraIdx)
+                        fprintf('Label3D: ''i'' key - Mouse not clearly over a single camera view. No action taken.\n');
+                        return;
+                    end
+                    
+                    current_status_val = obj.status(selected_node, targetCameraIdx, sessionFrameIdx);
+
+                    if current_status_val == obj.isInvisible
+                        % Toggle from invisible to unlabeled FOR THIS VIEW ONLY
+                        obj.status(selected_node, targetCameraIdx, sessionFrameIdx) = 0; % Unlabeled
+                        fprintf('Node %s (%d) in View %d marked as UNLABELED in frame %d (actual video frame %d).\n', ...
+                                obj.skeleton.joint_names{selected_node}, selected_node, targetCameraIdx, sessionFrameIdx, actualVideoFrameIdx);
                     else
-                        % Check status across all cams for consistency, use first as reference
-                        current_status_val = obj.status(selected_node, 1, current_frame_idx);
+                        % Toggle from any other state to invisible FOR THIS VIEW ONLY
+                        obj.status(selected_node, targetCameraIdx, sessionFrameIdx) = obj.isInvisible;
+                        obj.camPoints(selected_node, targetCameraIdx, :, sessionFrameIdx) = nan;
+                        obj.handLabeled2D(selected_node, targetCameraIdx, :, sessionFrameIdx) = nan;
+                        fprintf('Node %s (%d) in View %d marked as INVISIBLE in frame %d (actual video frame %d).\n', ...
+                                obj.skeleton.joint_names{selected_node}, selected_node, targetCameraIdx, sessionFrameIdx, actualVideoFrameIdx);
+                    end
 
-                        if current_status_val == obj.isInvisible
-                            % Toggle from invisible to unlabeled
-                            obj.status(selected_node, :, current_frame_idx) = 0;
-                            % camPoints and points3D remain NaN, user needs to re-label
-                            fprintf('Node %s (%d) marked as unlabeled in frame %d.\n', obj.skeleton.joint_names{selected_node}, selected_node, current_frame_idx);
+                    % --- TEMPORARY DEBUG: Comment out immediate updates ---
+                    % fprintf('DEBUG: Skipping checkStatus() and update() after status change.\n');
+                    % obj.checkStatus(); 
+                    % obj.update(); 
+                    % if obj.autosave
+                    %     obj.saveState();
+                    % end
+                    % drawnow; 
+                    % --- END TEMPORARY DEBUG ---
+
+                    % --- DEBUG: Force visual update of JUST the affected animator points --- 
+                    % This helps see if the NaN is correctly applied visually to target view ONLY
+                    targetKPAnimatorIdx = obj.nCams + targetCameraIdx;
+                    if targetKPAnimatorIdx <= numel(obj.h) && isvalid(obj.h{targetKPAnimatorIdx})
+                        kpa = obj.h{targetKPAnimatorIdx};
+                        kps_slice = squeeze(obj.camPoints(:, targetCameraIdx, :, sessionFrameIdx)); % Get updated 2D points for this view/frame
+                        if size(kps_slice, 2) == 2 % Ensure it's Nx2
+                            kpa.points.XData = kps_slice(:, 1);
+                            kpa.points.YData = kps_slice(:, 2);
+                            drawnow; % Force immediate redraw of just this plot
+                            fprintf('DEBUG: Directly updated X/YData for target KP animator %d.\n', targetKPAnimatorIdx);
                         else
-                            % Toggle from any other state to invisible
-                            obj.status(selected_node, :, current_frame_idx) = obj.isInvisible;
-                            obj.camPoints(selected_node, :, :, current_frame_idx) = nan;
-                            obj.points3D(selected_node, :, current_frame_idx) = nan;
-                            fprintf('Node %s (%d) marked as invisible in frame %d.\n', obj.skeleton.joint_names{selected_node}, selected_node, current_frame_idx);
+                            fprintf('DEBUG: Could not directly update X/YData, unexpected slice size.\n');
                         end
+                    end
+                    % --- END DEBUG --- 
 
-                        obj.checkStatus(); % Re-evaluate status and camPoints based on changes
-                        obj.update(); % Update visuals
-                        if obj.autosave
-                            obj.saveState();
-                        end
-                        drawnow; % Force graphics update
-                    end % --- End added case ---
             end
             
             % Extend Animator callback function
@@ -2277,6 +2309,49 @@ classdef Label3D < Animator
                 obj.loadMerge(files, varargin{:})
             else
                 obj.loadAll(files, varargin{:});
+            end
+        end
+
+        function targetCam = privaten_determineActiveCameraViewByMouse(obj)
+            targetCam = NaN;
+            fpt = obj.Parent.CurrentPoint; % Normalized figure coordinates [x, y]
+    
+            startIndex = (obj.currentCameraPage - 1) * obj.camerasPerPage + 1;
+            endIndex = min(obj.currentCameraPage * obj.camerasPerPage, obj.nCams);
+    
+            if startIndex > endIndex || obj.nCams == 0
+                return; % No cameras visible or available
+            end
+            
+            visibleCamGlobalIndices = startIndex:endIndex;
+            
+            foundCams = [];
+            for i = 1:numel(visibleCamGlobalIndices)
+                camIdxGlobal = visibleCamGlobalIndices(i);
+                
+                % VideoAnimators are in obj.h{1...nCams}
+                if camIdxGlobal <= numel(obj.h) && ...
+                   isa(obj.h{camIdxGlobal}, 'VideoAnimator') && ...
+                   isvalid(obj.h{camIdxGlobal}.Axes)
+                    
+                    axHandle = obj.h{camIdxGlobal}.Axes;
+                    % Ensure Axes Units are normalized for correct comparison with CurrentPoint
+                    originalUnits = get(axHandle, 'Units');
+                    set(axHandle, 'Units', 'normalized');
+                    axPos = get(axHandle, 'Position'); % [left, bottom, width, height]
+                    set(axHandle, 'Units', originalUnits); % Restore original units
+    
+                    if fpt(1) >= axPos(1) && fpt(1) <= (axPos(1) + axPos(3)) && ...
+                       fpt(2) >= axPos(2) && fpt(2) <= (axPos(2) + axPos(4))
+                        foundCams(end+1) = camIdxGlobal;
+                    end
+                end
+            end
+    
+            if numel(foundCams) == 1
+                targetCam = foundCams(1);
+            elseif numel(foundCams) > 1
+                warning('Label3D:determineActiveCam', 'Mouse over multiple camera views. Ambiguous for "i" key.');
             end
         end
     end % End of methods (Access = private) block
