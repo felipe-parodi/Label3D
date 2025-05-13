@@ -324,11 +324,10 @@ def l3d_to_coco(l3d_mat_path, base_skeleton_mat_path, output_coco_path):
                         print(f"  visible_xs count: {len(visible_xs)}")
 
 
-                if not visible_xs: 
-                    if num_labeled_kps_for_instance == 0: 
-                        if frame_s_idx < 2 and cam_idx < 2 and animal_inst_idx < 1: # Debug print for skipping
-                            print(f"  SKIPPING annotation: num_labeled_kps_for_instance is 0.")
-                        continue
+                if num_labeled_kps_for_instance == 0: # If no keypoints are v=1 or v=2
+                    if frame_s_idx < 2 and cam_idx < 2 and animal_inst_idx < 1: # Debug print for skipping
+                        print(f"  SKIPPING annotation (Option B): num_labeled_kps_for_instance is 0 for instance {animal_inst_idx}.")
+                    continue # Skip to the next animal instance
 
                 annotation_id_counter += 1
                 
@@ -345,8 +344,8 @@ def l3d_to_coco(l3d_mat_path, base_skeleton_mat_path, output_coco_path):
                     bbox_w_f = max(0.0, max_x_f_clipped - min_x_f_clipped)
                     bbox_h_f = max(0.0, max_y_f_clipped - min_y_f_clipped)
                     bbox_float = [min_x_f_clipped, min_y_f_clipped, bbox_w_f, bbox_h_f]
-                else:
-                    bbox_float = [0.0, 0.0, 0.0, 0.0] # Default if no visible points for bbox
+                else: # If num_labeled_kps_for_instance > 0 but all are v=1 (occluded)
+                    bbox_float = [0.0, 0.0, 0.0, 0.0] 
                 
                 bbox_coco = [int(round(c)) for c in bbox_float]
                 area = float(bbox_coco[2] * bbox_coco[3])
