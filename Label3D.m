@@ -1453,32 +1453,12 @@ classdef Label3D < Animator
                                 obj.skeleton.joint_names{selected_node}, selected_node, targetCameraIdx, sessionFrameIdx, actualVideoFrameIdx);
                     end
 
-                    % --- TEMPORARY DEBUG: Comment out immediate updates ---
-                    % fprintf('DEBUG: Skipping checkStatus() and update() after status change.\n');
-                    % obj.checkStatus(); 
-                    % obj.update(); 
-                    % if obj.autosave
-                    %     obj.saveState();
-                    % end
-                    % drawnow; 
-                    % --- END TEMPORARY DEBUG ---
-
-                    % --- DEBUG: Force visual update of JUST the affected animator points --- 
-                    % This helps see if the NaN is correctly applied visually to target view ONLY
-                    targetKPAnimatorIdx = obj.nCams + targetCameraIdx;
-                    if targetKPAnimatorIdx <= numel(obj.h) && isvalid(obj.h{targetKPAnimatorIdx})
-                        kpa = obj.h{targetKPAnimatorIdx};
-                        kps_slice = squeeze(obj.camPoints(:, targetCameraIdx, :, sessionFrameIdx)); % Get updated 2D points for this view/frame
-                        if size(kps_slice, 2) == 2 % Ensure it's Nx2
-                            kpa.points.XData = kps_slice(:, 1);
-                            kpa.points.YData = kps_slice(:, 2);
-                            drawnow; % Force immediate redraw of just this plot
-                            fprintf('DEBUG: Directly updated X/YData for target KP animator %d.\n', targetKPAnimatorIdx);
-                        else
-                            fprintf('DEBUG: Could not directly update X/YData, unexpected slice size.\n');
-                        end
+                    obj.checkStatus(); 
+                    obj.update(); 
+                    if obj.autosave
+                        obj.saveState();
                     end
-                    % --- END DEBUG --- 
+                    drawnow; 
 
             end
             
@@ -1525,8 +1505,13 @@ classdef Label3D < Animator
         end
         
         function setLabeled(obj)
-            % set the entire frame's status as labeled
-            obj.status(:, :, obj.frameInds(obj.frame)) = obj.isLabeled;
+            % set the entire frame's status as labeled, but respect isInvisible
+            currentFrameStatuses = obj.status(:, :, obj.frameInds(obj.frame));
+            % Create a mask for points that are NOT already invisible
+            notInvisibleMask = currentFrameStatuses ~= obj.isInvisible;
+            % Apply 'isLabeled' status only to points that are not invisible
+            currentFrameStatuses(notInvisibleMask) = obj.isLabeled;
+            obj.status(:, :, obj.frameInds(obj.frame)) = currentFrameStatuses;
             obj.update()
         end
         
@@ -1677,26 +1662,34 @@ classdef Label3D < Animator
             camParams = obj.origCamParams;
             path = sprintf('%s.mat', obj.savePath);
             handLabeled2D = obj.handLabeled2D;
+            camPoints = obj.camPoints; % ADDED
             % save framesToLabel & sync & rest
             if ~isempty(obj.framesToLabel) && ~isempty(obj.sync)
                 disp('saving with framesToLabel & sync')
                 sync = obj.sync;
                 framesToLabel = obj.framesToLabel;
-                save(path, 'data_3D', 'status', ...
+                nAnimalsInSession = obj.nAnimalsInSession; 
+                cameraNamesToSave = cellfun(@char, obj.cameraNames, 'UniformOutput', false); 
+                save(path, 'data_3D', 'status', 'camPoints', ... % ADDED 'camPoints'
                     'skeleton', 'imageSize', 'handLabeled2D', 'cameraPoses', 'camParams', ...
-                    'sync', 'framesToLabel')
+                    'sync', 'framesToLabel', 'nAnimalsInSession', 'cameraNamesToSave') 
             % save framesToLabel & rest
             elseif ~isempty(obj.framesToLabel)
                 disp('saving with framesToLabel')
                 framesToLabel = obj.framesToLabel;
-                save(path, 'data_3D', 'status', ...
+                nAnimalsInSession = obj.nAnimalsInSession; 
+                cameraNamesToSave = cellfun(@char, obj.cameraNames, 'UniformOutput', false); 
+                save(path, 'data_3D', 'status', 'camPoints', ... % ADDED 'camPoints'
                     'skeleton', 'imageSize', 'handLabeled2D', 'cameraPoses', 'camParams', ...
-                    'framesToLabel')
+                    'framesToLabel', 'nAnimalsInSession', 'cameraNamesToSave') 
             % just save rest
             else
                 disp('saving')
-                save(path, 'data_3D', 'status', ...
-                    'skeleton', 'imageSize', 'handLabeled2D', 'cameraPoses', 'camParams')
+                nAnimalsInSession = obj.nAnimalsInSession; 
+                cameraNamesToSave = cellfun(@char, obj.cameraNames, 'UniformOutput', false); 
+                save(path, 'data_3D', 'status', 'camPoints', ... % ADDED 'camPoints'
+                    'skeleton', 'imageSize', 'handLabeled2D', 'cameraPoses', 'camParams', ...
+                    'nAnimalsInSession', 'cameraNamesToSave') 
             end
         end
         
