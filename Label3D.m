@@ -1053,13 +1053,11 @@ classdef Label3D < Animator
                         currentJointId = jointIdsWith3D(idx);
                         % Assuming 'frame' passed to reprojectPoints is the actual video frame index.
                         % We need the session frame index to access obj.status and obj.camPoints correctly.
-                        sessionFrameIdx = find(obj.frameInds == frame, 1);
+                        sessionFrameIdx = frame; 
 
-                        if isempty(sessionFrameIdx)
-                            warning('Label3D:reprojectPoints', 'Could not find session frame index for actual frame %d. Skipping status check for this frame in reprojection.', frame);
-                            % If sessionFrameIdx is not found, we cannot reliably check status or assign camPoints for this frame.
-                            continue; % Skip to the next joint for this camera view
-                        end
+                        % The find logic and warning for isempty(sessionFrameIdx) are removed
+                        % as 'frame' is already the session index.
+                        % A check for validity of 'frame' as a session index could be added at the function start if necessary.
                         
                         currentStatus = obj.status(currentJointId, nCam, sessionFrameIdx);
                         
@@ -1268,7 +1266,7 @@ classdef Label3D < Animator
                     % Update handLabeled2D status (only if not invisible)
                     % Note: kpAnimator.dragged uses actualVideoFrameIdx
                     isNowConsideredLabeled = obj.status(marker_idx, nKPAnimator, sessionFrameIdx) == obj.isLabeled;
-                    wasDraggedInFrame = kpAnimator.dragged(actualVideoFrameIdx, marker_idx);
+                    wasDraggedInFrame = kpAnimator.dragged(sessionFrameIdx, marker_idx);
 
                     if isNowConsideredLabeled && wasDraggedInFrame
                         obj.handLabeled2D(marker_idx, nKPAnimator, :, sessionFrameIdx) = currentCoord;
@@ -1364,7 +1362,8 @@ classdef Label3D < Animator
                         if fr_gui > 0 && fr_gui <= numel(obj.frameInds)
                             fr_actual_video = obj.frameInds(fr_gui); 
 
-                            [camIdsLogical, jointIds] = obj.getLabeledJoints(fr_actual_video); 
+                            % Ensure getLabeledJoints is called with the GUI frame index
+                            [camIdsLogical, jointIds] = obj.getLabeledJoints(fr_gui); 
                             originalPoints = struct('jointId', {}, 'camIdx', {}, 'coords', {});
                             pointCounter = 1;
                             for j_idx = 1:numel(jointIds)
@@ -1379,9 +1378,11 @@ classdef Label3D < Animator
                                 end
                             end
 
-                            obj.triangulateLabeledPoints(fr_actual_video); 
+                            % Ensure triangulateLabeledPoints is called with the GUI frame index
+                            obj.triangulateLabeledPoints(fr_gui); 
                             
-                            obj.reprojectPoints(fr_actual_video); 
+                            % Ensure reprojectPoints is called with the GUI frame index
+                            obj.reprojectPoints(fr_gui); 
 
                             for i = 1:numel(originalPoints)
                                 jId = originalPoints(i).jointId;

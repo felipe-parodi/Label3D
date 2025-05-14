@@ -94,7 +94,7 @@ enableVideoCache = true;     % Set to true to save loaded frames for faster rest
 useParallel = true;          % Set to true if Parallel Computing Toolbox is available
 
 % --- Debugging flags for frame selection ---
-debug_use_first_N_frames_from_poses = true; % If true and loadPrecomputedPoses, takes only the first N frames
+debug_use_first_N_frames_from_poses = false; % If true and loadPrecomputedPoses, takes only the first N frames
 debug_N_frames_to_load = 10;                % Number of frames to load if debug_use_first_N_frames_from_poses is true
 
 % =========================================================================
@@ -327,28 +327,36 @@ if loadPrecomputedPoses
                     fprintf('  No frames selected based on debug settings.\n');
                 end
             else
-                % --- Original Subsampling Logic ---
-                maxFrameToConsider = 4800;
-                samplingInterval = 3; % Take 1 every 3 frames
-
-                % 1. Filter by max frame
-                frames_below_max = all_processed_frame_ids(all_processed_frame_ids <= maxFrameToConsider);
+                % --- Uniformly Sample 10 Frames Logic ---
+                num_frames_to_select = 10;
+                unique_processed_frames = unique(all_processed_frame_ids); % Ensure unique and sorted
                 
-                if isempty(frames_below_max)
-                    warning('No processed frames found at or below the max frame (%d).', maxFrameToConsider);
+                if numel(unique_processed_frames) == 0
+                    warning('No processed frame IDs available to sample from.');
                     framesToLabelIndices = [];
-                    nFramesToLabel = 0;
+                elseif numel(unique_processed_frames) <= num_frames_to_select
+                    % If fewer than or equal to 10 frames available, take all of them
+                    framesToLabelIndices = unique_processed_frames;
+                    fprintf('  Less than or equal to %d unique frames available. Selecting all %d frames.\n', ...
+                            num_frames_to_select, numel(framesToLabelIndices));
                 else
-                    % 2. Subsample (select 1st, 4th, 7th, etc. from the filtered list)
-                    framesToLabelIndices = frames_below_max(1:samplingInterval:end); 
-                    nFramesToLabel = numel(framesToLabelIndices);
-                    fprintf('  Selected %d frames by taking every %d frames up to frame %d.\n', ...
-                            nFramesToLabel, samplingInterval, maxFrameToConsider);
-                     if ~isempty(framesToLabelIndices)
-                          fprintf('  Selected frame range: %d to %d.\n', min(framesToLabelIndices), max(framesToLabelIndices));
-                     end
+                    % Uniformly sample
+                    indices = round(linspace(1, numel(unique_processed_frames), num_frames_to_select));
+                    framesToLabelIndices = unique_processed_frames(indices);
+                    % Ensure uniqueness again in case linspace produced duplicate indices with rounding
+                    framesToLabelIndices = unique(framesToLabelIndices); 
+                    fprintf('  Selected %d uniformly sampled frames from available processed frames.\n', ...
+                            numel(framesToLabelIndices));
                 end
-                % --- End Original Subsampling Logic ---
+                
+                nFramesToLabel = numel(framesToLabelIndices);
+                if ~isempty(framesToLabelIndices)
+                     fprintf('  Selected frame range: %d to %d.\n', min(framesToLabelIndices), max(framesToLabelIndices));
+                     fprintf('  Selected frames: %s\n', mat2str(framesToLabelIndices));
+                else
+                    fprintf('  No frames selected for labeling.\n');
+                end
+                % --- End Uniformly Sample 10 Frames Logic ---
             end
 
             % Ensure framesToLabelIndices is a row vector if not empty
