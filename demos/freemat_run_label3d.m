@@ -56,9 +56,12 @@ labelingCameraNames = {
 % --- Define which CAMERAS (from labelingCameraNames) to load poses for ---
 camerasToLoadPosesFor = {"Cam_003",
     "Cam_007", 
+    "Cam_010",
     "Cam_011",
+    "Cam_013",
     "Cam_016",
     "Cam_017",
+    "Cam_024",
     "Cam_028"
     };
 numCameras = numel(labelingCameraNames);
@@ -92,7 +95,7 @@ useParallel = true;          % Set to true if Parallel Computing Toolbox is avai
 
 % --- Debugging flags for frame selection ---
 debug_use_first_N_frames_from_poses = true; % If true and loadPrecomputedPoses, takes only the first N frames
-debug_N_frames_to_load = 40;                % Number of frames to load if debug_use_first_N_frames_from_poses is true
+debug_N_frames_to_load = 20;                % Number of frames to load if debug_use_first_N_frames_from_poses is true
 
 % =========================================================================
 % --- Precomputed 2D Pose Configuration ---

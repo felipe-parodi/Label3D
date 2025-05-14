@@ -182,6 +182,10 @@ classdef Label3D < Animator
         prevPageButton % Handle to the 'Previous Page' button
         pageInfoText   % Handle to the text displaying page info
 
+        % --- Properties for Undo Triangulation ---
+        previousPoints3D_Undo   % Stores obj.points3D of the current frame before triangulation
+        previousCamPoints_Undo    % Stores obj.camPoints of the current frame before triangulation
+        undoDataValidForFrame = NaN % Tracks which GUI frame the undo data is for
         % ===========================
         % Useful Inherited properties
         % ===========================
@@ -1303,6 +1307,32 @@ classdef Label3D < Animator
                 case 'backspace'
                     obj.deleteSelectedNode();
                 case 't'
+                    % --- BEGIN ADDITION: Save state for Undo ---
+                    sessionFrameToSaveUndo = obj.frame; % GUI frame index
+                    if ~isempty(obj.points3D) && ndims(obj.points3D) == 3 && size(obj.points3D,3) >= sessionFrameToSaveUndo
+                        slice_3d = obj.points3D(:, :, sessionFrameToSaveUndo);
+                        if ~isempty(slice_3d)
+                            obj.previousPoints3D_Undo = slice_3d;
+                        else
+                            obj.previousPoints3D_Undo = [];
+                        end
+                    else
+                        obj.previousPoints3D_Undo = []; 
+                    end
+                    if ~isempty(obj.camPoints) && ndims(obj.camPoints) == 4 && size(obj.camPoints,4) >= sessionFrameToSaveUndo
+                        slice_2d = obj.camPoints(:, :, :, sessionFrameToSaveUndo);
+                        if ~isempty(slice_2d)
+                            obj.previousCamPoints_Undo = slice_2d;
+                        else
+                            obj.previousCamPoints_Undo = [];
+                        end
+                    else
+                        obj.previousCamPoints_Undo = []; 
+                    end
+                    obj.undoDataValidForFrame = sessionFrameToSaveUndo;
+                    fprintf('Label3D: Undo state saved for frame %d.\n', sessionFrameToSaveUndo);
+                    % --- END ADDITION: Save state for Undo ---
+
                     obj.checkStatus();
                     
                     % Check if a node is held for any of the draggable
@@ -1311,67 +1341,65 @@ classdef Label3D < Animator
                     draggableAnimators = obj.h(obj.nCams + 1 : 2 * obj.nCams);
                     for nAnimator = 1 : numel(draggableAnimators)
                         curAnimator = draggableAnimators{nAnimator};
-                        if ~isnan(curAnimator.selectedNode)
+                        if isvalid(curAnimator) && isprop(curAnimator, 'selectedNode') && isscalar(curAnimator.selectedNode) && ~isnan(curAnimator.selectedNode) 
                             camInFocus = nAnimator;
                             marker = curAnimator.selectedNode;
-                            position = curAnimator.selectedNodePosition;
+                            position = curAnimator.selectedNodePosition; 
                             nodeIsHeld = true;
                         end
                     end
                     
-                    % If a marker is currently held, weigh it heavily in a
-                    % multiview regression, otherwise do normal multiview
-                    % regression.
                     if nodeIsHeld
-                        obj.camPoints(marker, camInFocus, :, obj.frameInds(obj.frame)) = position;
+                        if obj.frame > 0 && obj.frame <= numel(obj.frameInds)
+                             obj.camPoints(marker, camInFocus, :, obj.frame) = position; 
+                        else
+                            warning('Label3D:TriangulateNodeHeld', 'obj.frame invalid for obj.frameInds.');
+                            return;
+                        end
                         obj.checkStatus();
                         obj.update()
                         obj.forceTriangulateLabeledPoints(camInFocus, marker)
                     else
-                        % --- START MODIFICATION ---
-                        fr = obj.frameInds(obj.frame);
-                        % 1. Get labeled joints/cameras and store original points
-                        [camIdsLogical, jointIds] = obj.getLabeledJoints(fr);
-                        originalPoints = struct('jointId', {}, 'camIdx', {}, 'coords', {});
-                        pointCounter = 1;
-                        for j_idx = 1:numel(jointIds)
-                            currentJointId = jointIds(j_idx);
-                            % Find camera indices for this joint (logical row from camIdsLogical)
-                            labeledCamIndicesForJoint = find(camIdsLogical(j_idx, :)); 
-                            for c_idx = 1:numel(labeledCamIndicesForJoint)
-                                currentCamIdx = labeledCamIndicesForJoint(c_idx);
-                                originalPoints(pointCounter).jointId = currentJointId;
-                                originalPoints(pointCounter).camIdx = currentCamIdx;
-                                % Read coords directly before they get overwritten
-                                originalPoints(pointCounter).coords = squeeze(obj.camPoints(currentJointId, currentCamIdx, :, fr));
-                                pointCounter = pointCounter + 1;
-                            end
-                        end
+                        fr_gui = obj.frame; 
+                        if fr_gui > 0 && fr_gui <= numel(obj.frameInds)
+                            fr_actual_video = obj.frameInds(fr_gui); 
 
-                        % 2. Perform triangulation (updates obj.points3D)
-                        obj.triangulateLabeledPoints(fr);
-                        
-                        % 3. Reproject points (updates obj.camPoints for ALL cams)
-                        obj.reprojectPoints(fr);
-
-                        % 4. Restore original points for the views used in triangulation
-                        for i = 1:numel(originalPoints)
-                            jId = originalPoints(i).jointId;
-                            cId = originalPoints(i).camIdx;
-                            origCoords = originalPoints(i).coords;
-                            % Check if coords are valid before writing back
-                            if ~any(isnan(origCoords))
-                                obj.camPoints(jId, cId, :, fr) = origCoords;
+                            [camIdsLogical, jointIds] = obj.getLabeledJoints(fr_actual_video); 
+                            originalPoints = struct('jointId', {}, 'camIdx', {}, 'coords', {});
+                            pointCounter = 1;
+                            for j_idx = 1:numel(jointIds)
+                                currentJointId = jointIds(j_idx);
+                                labeledCamIndicesForJoint = find(camIdsLogical(j_idx, :)); 
+                                for c_idx = 1:numel(labeledCamIndicesForJoint)
+                                    currentCamIdx = labeledCamIndicesForJoint(c_idx);
+                                    originalPoints(pointCounter).jointId = currentJointId;
+                                    originalPoints(pointCounter).camIdx = currentCamIdx;
+                                    originalPoints(pointCounter).coords = squeeze(obj.camPoints(currentJointId, currentCamIdx, :, fr_gui));
+                                    pointCounter = pointCounter + 1;
+                                end
                             end
+
+                            obj.triangulateLabeledPoints(fr_actual_video); 
+                            
+                            obj.reprojectPoints(fr_actual_video); 
+
+                            for i = 1:numel(originalPoints)
+                                jId = originalPoints(i).jointId;
+                                cId = originalPoints(i).camIdx;
+                                origCoords = originalPoints(i).coords;
+                                if ~any(isnan(origCoords))
+                                    obj.camPoints(jId, cId, :, fr_gui) = origCoords;
+                                end
+                            end
+                        else
+                            warning('Label3D:Triangulate', 'Current GUI frame index obj.frame invalid.');
                         end
-                        % --- END MODIFICATION ---
                     end
-                    % Original call to update display remains here
                     update(obj)
                     if obj.autosave
                         obj.saveState()
                     end
-                    drawnow; % Force graphics update
+                    drawnow; 
                 case 'tab'
                     if wasShiftPressed
                         obj.selectNode(obj.selectedNode - 1)
@@ -1399,11 +1427,58 @@ classdef Label3D < Animator
                         obj.triangulateView();
                         obj.resetAspectRatio();
                     end
-                case 'z'
-                    if ~wasShiftPressed
-                        obj.toggleZoomIn;
+                case 'z' % MODIFIED FOR CTRL+Z UNDO
+                    if wasCtrlPressed 
+                        % --- UNDO TRIANGULATION ---
+                        sessionFrameToUndo = obj.frame; 
+                        if isequal(obj.undoDataValidForFrame, sessionFrameToUndo) && ...
+                           ~isempty(obj.previousCamPoints_Undo) 
+                            
+                            fprintf('Label3D: Undoing last triangulation for frame %d.\n', sessionFrameToUndo);
+                            
+                            % MODIFIED condition for points3D restoration
+                            if ~isempty(obj.previousPoints3D_Undo) && ...
+                               ndims(obj.points3D) == 3 && size(obj.points3D,3) >= sessionFrameToUndo && ...
+                               ndims(obj.previousPoints3D_Undo) == ndims(obj.points3D(:,:,sessionFrameToUndo)) && ...
+                               all(size(obj.previousPoints3D_Undo) == size(obj.points3D(:,:,sessionFrameToUndo)))
+                                obj.points3D(:, :, sessionFrameToUndo) = obj.previousPoints3D_Undo;
+                            elseif ~isempty(obj.previousPoints3D_Undo)
+                                warning('Label3D:Undo', 'Size mismatch or invalid dimensions for points3D undo data. Not restoring 3D points.');
+                            end
+                            
+                            % MODIFIED condition for camPoints restoration
+                            if ~isempty(obj.previousCamPoints_Undo) && ...
+                               ndims(obj.camPoints) == 4 && size(obj.camPoints,4) >= sessionFrameToUndo && ...
+                               ndims(obj.previousCamPoints_Undo) == ndims(obj.camPoints(:,:,:,sessionFrameToUndo)) && ...
+                               all(size(obj.previousCamPoints_Undo) == size(obj.camPoints(:,:,:,sessionFrameToUndo)))
+                                obj.camPoints(:, :, :, sessionFrameToUndo) = obj.previousCamPoints_Undo;
+                            else % Removed elseif ~isempty(), just else for the warning
+                                warning('Label3D:Undo', 'Size mismatch or invalid dimensions for camPoints undo data. Not restoring 2D points.');
+                            end
+
+                            obj.previousPoints3D_Undo = [];
+                            obj.previousCamPoints_Undo = [];
+                            obj.undoDataValidForFrame = NaN;
+
+                            % --- MODIFIED ORDER ---
+                            obj.update();      % Update visuals FIRST from restored data
+                            obj.checkStatus(); % Then update status based on new visuals/data
+                            % --- END MODIFIED ORDER ---
+                                                       
+                            if obj.autosave
+                                obj.saveState(); 
+                            end
+                            drawnow;
+                        else
+                            fprintf('Label3D: No undo data available for current frame %d or data is for a different/invalid frame.\n', sessionFrameToUndo);
+                        end
                     else
-                        obj.togglePan;
+                        % Original 'z' behavior (toggle zoom)
+                        if ~wasShiftPressed
+                            obj.toggleZoomIn;
+                        else
+                            obj.togglePan;
+                        end
                     end
                 case 'l'
                     obj.setLabeled();
