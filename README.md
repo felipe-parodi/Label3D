@@ -1,6 +1,6 @@
 # Label3D
 
-A highly tailored version of Diego Aldarondo's [implementation](https://github.com/diegoaldarondo/Label3D).
+A highly tailored (and messy) version of Diego Aldarondo's [implementation](https://github.com/diegoaldarondo/Label3D).
 
 Includes:
 - Plotting of camera principal point.
@@ -13,7 +13,10 @@ Includes:
   - Flow: Label point --> i to remove --> i to re-add as unlabeled --> re-label.
 - 2D data export to COCO format.
 - Instance deletion with 'm' key.
-- Undo triangulation with 
+- Undo triangulation with ctrl+z.
+- Copy labels from previous frame with 'y' key.
+
+(There's a bit of redundancy, and I'll clean it up later.)
 
 Current flow:
 1. Load 2D pose data, frames, and camera calibration parameters.

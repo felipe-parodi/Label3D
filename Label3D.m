@@ -1599,6 +1599,59 @@ classdef Label3D < Animator
                     else
                         warning('Label3D:''m'' key - nAnimalsInSession or nMarkers is zero. Cannot determine instance.');
                     end
+                case 'y' % Yank (copy) data from previous frame to current frame
+                    current_gui_frame = obj.frame;
+
+                    if current_gui_frame == 1
+                        fprintf('Label3D: Already at the first frame. No previous frame to copy from.\n');
+                        return;
+                    end
+
+                    prev_gui_frame = current_gui_frame - 1;
+
+                    fprintf('Label3D: Copying data from GUI frame %d to GUI frame %d.\n', prev_gui_frame, current_gui_frame);
+
+                    % --- Copy points3D ---
+                    if ~isempty(obj.points3D) && ndims(obj.points3D) == 3 && ...
+                       size(obj.points3D, 3) >= prev_gui_frame && size(obj.points3D, 3) >= current_gui_frame
+                        obj.points3D(:, :, current_gui_frame) = obj.points3D(:, :, prev_gui_frame);
+                    else
+                        warning('Label3D:CopyPrevFrame', 'Could not copy points3D (array empty, wrong dimensions, or frame out of bounds).');
+                    end
+
+                    % --- Copy status ---
+                    if ~isempty(obj.status) && ndims(obj.status) == 3 && ...
+                       size(obj.status, 3) >= prev_gui_frame && size(obj.status, 3) >= current_gui_frame
+                        obj.status(:, :, current_gui_frame) = obj.status(:, :, prev_gui_frame);
+                    else
+                        warning('Label3D:CopyPrevFrame', 'Could not copy status (array empty, wrong dimensions, or frame out of bounds).');
+                    end
+
+                    % --- Copy camPoints ---
+                    if ~isempty(obj.camPoints) && ndims(obj.camPoints) == 4 && ...
+                       size(obj.camPoints, 4) >= prev_gui_frame && size(obj.camPoints, 4) >= current_gui_frame
+                        obj.camPoints(:, :, :, current_gui_frame) = obj.camPoints(:, :, :, prev_gui_frame);
+                    else
+                        warning('Label3D:CopyPrevFrame', 'Could not copy camPoints (array empty, wrong dimensions, or frame out of bounds).');
+                    end
+                    
+                    % --- Copy handLabeled2D ---
+                    if ~isempty(obj.handLabeled2D) && ndims(obj.handLabeled2D) == 4 && ...
+                       size(obj.handLabeled2D, 4) >= prev_gui_frame && size(obj.handLabeled2D, 4) >= current_gui_frame
+                        obj.handLabeled2D(:, :, :, current_gui_frame) = obj.handLabeled2D(:, :, :, prev_gui_frame);
+                    else
+                        warning('Label3D:CopyPrevFrame', 'Could not copy handLabeled2D (array empty, wrong dimensions, or frame out of bounds).');
+                    end
+
+                    % Update visuals and status
+                    obj.update();      % Update visuals based on copied data
+                    obj.checkStatus(); % Update status based on new data (important if status copy changes things)
+                    
+                    if obj.autosave
+                        obj.saveState();
+                    end
+                    drawnow;
+                    fprintf('Label3D: Data copied from frame %d to %d.\n', prev_gui_frame, current_gui_frame);
             end
             
             % Extend Animator callback function

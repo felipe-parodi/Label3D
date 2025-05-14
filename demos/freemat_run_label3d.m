@@ -95,7 +95,7 @@ useParallel = true;          % Set to true if Parallel Computing Toolbox is avai
 
 % --- Debugging flags for frame selection ---
 debug_use_first_N_frames_from_poses = true; % If true and loadPrecomputedPoses, takes only the first N frames
-debug_N_frames_to_load = 20;                % Number of frames to load if debug_use_first_N_frames_from_poses is true
+debug_N_frames_to_load = 10;                % Number of frames to load if debug_use_first_N_frames_from_poses is true
 
 % =========================================================================
 % --- Precomputed 2D Pose Configuration ---
