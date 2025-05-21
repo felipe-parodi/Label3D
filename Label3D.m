@@ -1901,16 +1901,26 @@ classdef Label3D < Animator
             imageSize = obj.ImageSize;
             cameraPoses = obj.cameraPoses;
             
-            % Reshape to dannce specifications
-            % Only take the labeled frames
-            labeledFrames = ~any(obj.status ~= obj.isLabeled, 2);
-            labeledFrames = repelem(labeledFrames, 1, 3, 1);
-            pts3D = obj.points3D;
-            pts3D(~labeledFrames) = nan;
-            data_3D = permute(pts3D, [3, 2, 1]);
-            data_3D = reshape(data_3D, size(data_3D, 1), []);
-            %             data_3D(~any(~isnan(data_3D), 2), :) = [];
-            %             pts3D(any(~any(~isnan(pts3D), 2), 3), :, :) = [];
+            % --- MODIFIED: Directly use obj.points3D and reshape --- 
+            % obj.points3D is (nMarkers, 3, nFrames)
+            temp_points3D_for_saving = obj.points3D;
+
+            % Reshape to DANNCE-like format (nFrames, nMarkers*3)
+            if ~isempty(temp_points3D_for_saving) && ndims(temp_points3D_for_saving) == 3
+                % Permute to (nFrames, 3, nMarkers) first
+                data_3D_permuted = permute(temp_points3D_for_saving, [3, 2, 1]);
+                % Then reshape to (nFrames, nMarkers*3)
+                data_3D = reshape(data_3D_permuted, size(data_3D_permuted, 1), []);
+            elseif ~isempty(temp_points3D_for_saving) && ndims(temp_points3D_for_saving) == 2 && size(temp_points3D_for_saving,2) == (obj.nMarkers*3) && size(temp_points3D_for_saving,1) == obj.nFrames
+                % If it somehow was already (nFrames, nMarkers*3) from an older load/format, use as is.
+                data_3D = temp_points3D_for_saving;
+            else 
+                % Handle empty or unexpectedly shaped points3D - create empty compatible array
+                data_3D = zeros(obj.nFrames, obj.nMarkers * 3); % Or NaNs, depending on desired empty state
+                if obj.nFrames > 0, data_3D(:) = NaN; end % Fill with NaNs if frames exist
+                warning('Label3D:saveState', 'obj.points3D was empty or had unexpected dimensions. Saving data_3D as NaNs.');
+            end
+            % --- END MODIFICATION ---
             
             camParams = obj.origCamParams;
             path = sprintf('%s.mat', obj.savePath);

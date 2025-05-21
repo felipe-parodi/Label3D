@@ -7,7 +7,7 @@ clc;
 
 % --- User Configuration ---
 % Path to the Label3D output .mat file you want to visualize
-label3d_output_mat_file = 'A:\\EnclosureProjects\\inprep\\freemat\\code\\calibration\\WMcalibration\\Label3D\\labeling_output\\20250521_151216_Label3D.mat'; % EXAMPLE, PLEASE CHANGE
+label3d_output_mat_file = 'A:\\EnclosureProjects\\inprep\\freemat\\code\\calibration\\WMcalibration\\Label3D\\labeling_output\\20250521_152430_Label3D.mat'; % EXAMPLE, PLEASE CHANGE
 
 % Output video file path and name
 output_video_file = 'A:\\EnclosureProjects\\inprep\\freemat\\code\\calibration\\WMcalibration\\Label3D\\labeling_output\\visualization_video2.mp4'; % EXAMPLE, PLEASE CHANGE
