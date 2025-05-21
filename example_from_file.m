@@ -9,11 +9,18 @@ addpath(genpath('skeletons'));
 
 % Path to the DANNCE project folder
 % This folder should contain at least the following folders: "videos", "calibration"
-projectFolder = "C:\data\F5-F7_openfield_photometry\alone\day1\240116_151948_F7";
-labelDataFilename = '20240423_170638_Label3D.mat';
-frameCacheFilename = 'frameCache_f75.mat';
+projectFolder = "A:\EnclosureProjects\inprep\freemat\code\calibration\WMcalibration\Label3D";
+labelDataFilename = '20250521_123240_Label3D.mat';
+frameCacheFilename = 'frameCache_viz_n20_fStart1_fEnd4839_cams3_0.mat';
 
-labelingFolder = fullfile(projectFolder, "labeling");
+labelingFolder = fullfile(projectFolder, "labeling_output");
+
+% --- NEW: Configuration for resuming a session ---
+% These flags must match the settings used when the session was ORIGINALLY created (e.g., in freemat_run_label3d.m)
+original_undistorted_images_flag = true;  % EXAMPLE: Set to true if original session used undistorted images
+original_flip_views_vertically_flag = true; % EXAMPLE: Set to true if original session used flipped views
+
+% --- END NEW CONFIG ---
 
 % if this is true, automatically export the data after launching the gui
 exportData = true;
@@ -32,19 +39,41 @@ frameCacheFilePath = fullfile(labelingFolder, frameCacheFilename);
 
 labelDataFileInfo = who ('-file', labelDataFilePath);
 
-tmp = load(frameCacheFilePath, "framesToLabel");
-frameCacheFramesToLabel = tmp.framesToLabel;
+% Load the correct variable name from the frame cache file
+tmp = load(frameCacheFilePath, "cachedFramesToLabelIndices");
+
+% Check if 'cachedFramesToLabelIndices' was actually loaded
+if ~isfield(tmp, 'cachedFramesToLabelIndices')
+    error('ResumeError: cachedFramesToLabelIndices not found in frame cache file: %s. Please ensure the cache file is correct and contains this variable.', frameCacheFilePath);
+end
+frameCacheFramesToLabel = tmp.cachedFramesToLabelIndices;
 
 framesToLabel = 0;
+loaded_nAnimals = 0;
+loaded_cameraNames = {};
 
 if ismember('framesToLabel', labelDataFileInfo)
-    tmp = load(labelDataFilePath, "framesToLabel");
-    labelDataFramesToLabel = tmp.framesToLabel;
+    % Load framesToLabel, nAnimalsInSession, and cameraNamesToSave from the Label3D .mat file
+    tmp_label_data = load(labelDataFilePath, "framesToLabel", "nAnimalsInSession", "cameraNamesToSave");
+    labelDataFramesToLabel = tmp_label_data.framesToLabel;
 
+    if isfield(tmp_label_data, 'nAnimalsInSession')
+        loaded_nAnimals = tmp_label_data.nAnimalsInSession;
+    else
+        error('ResumeError: nAnimalsInSession not found in %s. Cannot resume.', labelDataFilePath);
+    end
+
+    if isfield(tmp_label_data, 'cameraNamesToSave')
+        loaded_cameraNames = tmp_label_data.cameraNamesToSave;
+        if ~iscell(loaded_cameraNames) % Ensure it's a cell array
+            loaded_cameraNames = cellstr(loaded_cameraNames);
+        end
+    else
+        error('ResumeError: cameraNamesToSave not found in %s. Cannot resume.', labelDataFilePath);
+    end
 
     if isequaln(labelDataFramesToLabel, frameCacheFramesToLabel)
-        disp("Frame cache appears to be accurate. Loading cached data ..." + ...
-            " may take a few seconds")
+        disp("Frame cache 'framesToLabel' matches 'framesToLabel' in Label3D .mat file. Loading cached video data...");
         framesToLabel = labelDataFramesToLabel;
     else
         disp("Frame cache frameToLabel not equal to labelData frameToLabel." + ...
@@ -92,7 +121,11 @@ videos = frameCacheData.videos;
 close all;
 fprintf("Launching Label3D. May take a few seconds...\n")
 labelGui = Label3D(labelDataFilePath, videos, 'savePath', labelingFolder, ...
-    'framesToLabel', framesToLabel );
+    'framesToLabel', framesToLabel, ...
+    'nAnimals', loaded_nAnimals, ...
+    'cameraNames', loaded_cameraNames, ...
+    'undistortedImages', original_undistorted_images_flag, ...
+    'flipViewsVertically', original_flip_views_vertically_flag);
 
 %% Optionally export the data to the dannce data format and close the GUI
 

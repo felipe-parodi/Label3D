@@ -175,7 +175,7 @@ classdef Label3D < Animator
         flipViewsVertically = false; % If true, display camera views flipped vertically
 
         % --- Camera View Pagination Properties ---
-        camerasPerPage = 2; % Number of camera views to show per page
+        camerasPerPage = 3; % Number of camera views to show per page
         currentCameraPage = 1; % Current page number (1-indexed)
         totalPages = 1; % Total number of pages (calculated)
         nextPageButton % Handle to the 'Next Page' button
@@ -573,12 +573,43 @@ classdef Label3D < Animator
             end
             
             % Initialize data and accounting matrices
-            if ~isempty(obj.markers)
-                obj.camPoints = nan(obj.nMarkers, obj.nCams, 2, obj.nFrames);
-                obj.handLabeled2D = nan(obj.nMarkers, obj.nCams, 2, obj.nFrames);
-            end
-            obj.points3D = nan(obj.nMarkers, 3, obj.nFrames);
+            obj.camPoints = nan(obj.nMarkers, obj.nCams, 2, obj.nFrames);
+            obj.handLabeled2D = nan(obj.nMarkers, obj.nCams, 2, obj.nFrames); % Initialize handLabeled2D as well
+            obj.points3D = nan(obj.nMarkers, 3, obj.nFrames); % RE-INSERTED: Initialize 3D points array
             obj.status = zeros(obj.nMarkers, obj.nCams, obj.nFrames);
+            
+            % --- BEGIN POPULATE camPoints and status FROM initialMarkers ---
+            if ~isempty(obj.initialMarkers)v
+                fprintf('Label3D:buildFromScratch: Populating camPoints and status from initialMarkers...\n');
+                for sessionFrameIdx = 1:obj.nFrames % Iterate through selected session frames (1 to numel(obj.framesToLabel))
+                    actualVideoFrameIdx = obj.frameInds(sessionFrameIdx); % Get original video frame number
+
+                    for iCam = 1:obj.nCams
+                        if isempty(obj.initialMarkers) || isempty(obj.initialMarkers{iCam}) || actualVideoFrameIdx > size(obj.initialMarkers{iCam}, 1)
+                            % No initial data for this cam, or frame index out of bounds for this cam's initialMarkers
+                            continue;
+                        end
+                        
+                        % obj.initialMarkers{iCam} is (origNFrames, 2, nMarkers)
+                        % We need data for actualVideoFrameIdx: obj.initialMarkers{iCam}(actualVideoFrameIdx, :, :)
+                        % This slice is (1, 2, nMarkers)
+                        currentFrameInitialDataSliceForCam = squeeze(obj.initialMarkers{iCam}(actualVideoFrameIdx, :, :)); % Becomes (2, nMarkers)
+                        
+                        for iMarker = 1:obj.nMarkers
+                            if iMarker <= size(currentFrameInitialDataSliceForCam, 2) % Check marker index bounds
+                                coord = currentFrameInitialDataSliceForCam(:, iMarker)'; % Get (1,2) coord for this marker
+                                if ~any(isnan(coord))
+                                    obj.camPoints(iMarker, iCam, :, sessionFrameIdx) = coord;
+                                    obj.status(iMarker, iCam, sessionFrameIdx) = obj.isInitialized;
+                                    % obj.handLabeled2D remains NaN for these initially loaded points, which is correct
+                                end
+                            end
+                        end
+                    end
+                end
+                fprintf('Label3D:buildFromScratch: Finished populating camPoints and status from initialMarkers.\n');
+            end
+            % --- END POPULATE camPoints and status FROM initialMarkers ---
             
             % Make images rescalable
             cellfun(@(X) set(X.Axes, ...
@@ -1299,8 +1330,10 @@ classdef Label3D < Animator
                     fprintf(message);
                 case 's'
                     if wasShiftPressed
+                        obj.checkStatus(); % Ensure obj.camPoints is updated from DKAs
+                        obj.update();      % Ensure DKAs are consistent if needed, though checkStatus should be primary here
                         obj.saveState()
-                        fprintf('Saved state to %s\n', obj.savePath);
+                        fprintf('Saved state to %s\\n', obj.savePath);
                     end
                 case 'backspace'
                     obj.deleteSelectedNode();
@@ -1328,15 +1361,19 @@ classdef Label3D < Animator
                         obj.previousCamPoints_Undo = []; 
                     end
                     obj.undoDataValidForFrame = sessionFrameToSaveUndo;
-                    fprintf('Label3D: Undo state saved for frame %d.\n', sessionFrameToSaveUndo);
+                    fprintf('Label3D: Undo state saved for frame %d.\\n', sessionFrameToSaveUndo);
                     % --- END ADDITION: Save state for Undo ---
 
-                    obj.checkStatus();
+                    obj.checkStatus(); % Update status based on current DKA states before triangulation
                     
                     % Check if a node is held for any of the draggable
                     % keypoint animators.
                     nodeIsHeld = false;
                     draggableAnimators = obj.h(obj.nCams + 1 : 2 * obj.nCams);
+                    camInFocus = NaN; % Initialize
+                    marker = NaN; % Initialize
+                    position = [NaN NaN]; % Initialize
+
                     for nAnimator = 1 : numel(draggableAnimators)
                         curAnimator = draggableAnimators{nAnimator};
                         if isvalid(curAnimator) && isprop(curAnimator, 'selectedNode') && isscalar(curAnimator.selectedNode) && ~isnan(curAnimator.selectedNode) 
@@ -1344,59 +1381,82 @@ classdef Label3D < Animator
                             marker = curAnimator.selectedNode;
                             position = curAnimator.selectedNodePosition; 
                             nodeIsHeld = true;
+                            break; % Found a held node
                         end
                     end
                     
-                    if nodeIsHeld
+                    if nodeIsHeld % Logic for triangulating a single, actively dragged point (less common)
                         if obj.frame > 0 && obj.frame <= numel(obj.frameInds)
                              obj.camPoints(marker, camInFocus, :, obj.frame) = position; 
                         else
                             warning('Label3D:TriangulateNodeHeld', 'obj.frame invalid for obj.frameInds.');
                             return;
                         end
-                        obj.checkStatus();
+                        obj.checkStatus(); % Re-check status after updating camPoints for the dragged point
                         obj.update()
-                        obj.forceTriangulateLabeledPoints(camInFocus, marker)
-                    else
+                        obj.forceTriangulateLabeledPoints(camInFocus, marker) % This triangulates a specific point
+                        % After forceTriangulateLabeledPoints, points3D for 'marker' is updated.
+                        % We might need to reproject this single point if that's the desired behavior.
+                        % For now, let's assume forceTriangulate also updates 2D views or that 'update' handles it.
+                    else % Standard case: triangulate all eligible points in the frame
                         fr_gui = obj.frame; 
                         if fr_gui > 0 && fr_gui <= numel(obj.frameInds)
-                            fr_actual_video = obj.frameInds(fr_gui); 
+                            % fr_actual_video = obj.frameInds(fr_gui); % Not directly used here, but good for context
 
-                            % Ensure getLabeledJoints is called with the GUI frame index
-                            [camIdsLogical, jointIds] = obj.getLabeledJoints(fr_gui); 
-                            originalPoints = struct('jointId', {}, 'camIdx', {}, 'coords', {});
-                            pointCounter = 1;
-                            for j_idx = 1:numel(jointIds)
-                                currentJointId = jointIds(j_idx);
-                                labeledCamIndicesForJoint = find(camIdsLogical(j_idx, :)); 
-                                for c_idx = 1:numel(labeledCamIndicesForJoint)
-                                    currentCamIdx = labeledCamIndicesForJoint(c_idx);
-                                    originalPoints(pointCounter).jointId = currentJointId;
-                                    originalPoints(pointCounter).camIdx = currentCamIdx;
-                                    originalPoints(pointCounter).coords = squeeze(obj.camPoints(currentJointId, currentCamIdx, :, fr_gui));
-                                    pointCounter = pointCounter + 1;
+                            % --- MODIFICATION: Capture pre-triangulation camPoints and status ---
+                            pre_tri_camPoints_frame = squeeze(obj.camPoints(:,:,:,fr_gui)); % (nMarkers, nCams, 2)
+                            pre_tri_status_frame    = squeeze(obj.status(:,:,fr_gui));    % (nMarkers, nCams)
+                            % --- END MODIFICATION ---
+
+                            obj.triangulateLabeledPoints(fr_gui); % Calculates obj.points3D
+                            obj.reprojectPoints(fr_gui);          % Updates obj.camPoints with reprojected values
+
+                            % --- MODIFICATION: Selective restoration of camPoints and status ---
+                            current_camPoints_frame = squeeze(obj.camPoints(:,:,:,fr_gui)); % Get reprojected points
+
+                            for m_idx = 1:obj.nMarkers
+                                for c_idx = 1:obj.nCams
+                                    % If the point had a valid 2D label before triangulation
+                                    % (i.e., status was Initialized or Labeled, and not Invisible)
+                                    % and its coordinates were not NaN, restore those original 2D coordinates.
+                                    original_status = pre_tri_status_frame(m_idx, c_idx);
+                                    original_coords = squeeze(pre_tri_camPoints_frame(m_idx, c_idx, :)); % Ensure it's a column vector [x;y]
+
+                                    is_valid_original_status = (original_status == obj.isInitialized || original_status == obj.isLabeled) && ...
+                                                               (original_status ~= obj.isInvisible);
+                                    
+                                    is_valid_original_coords = ~any(isnan(original_coords));
+
+                                    if is_valid_original_status && is_valid_original_coords
+                                        % Restore the original 2D point
+                                        current_camPoints_frame(m_idx, c_idx, :) = original_coords;
+                                        % Ensure its status is also restored, as reprojection shouldn't change status
+                                        % but we want to be certain it reflects the pre-triangulation state here.
+                                        obj.status(m_idx, c_idx, fr_gui) = original_status;
+                                    else
+                                        % If original was not valid (e.g. unlabeled, invisible, or NaN coords),
+                                        % then the reprojected point (already in current_camPoints_frame) is acceptable.
+                                        % We still need to ensure its status is appropriate.
+                                        % If reprojected point is NaN, status should be 0 (unlabeled) unless it's invisible.
+                                        reprojected_coords = squeeze(current_camPoints_frame(m_idx, c_idx, :));
+                                        if original_status ~= obj.isInvisible % Only change status if not explicitly invisible
+                                            if any(isnan(reprojected_coords))
+                                                obj.status(m_idx, c_idx, fr_gui) = 0; % Unlabeled
+                                            elseif obj.status(m_idx, c_idx, fr_gui) == 0 % If it was unlabeled and now has coords
+                                                obj.status(m_idx, c_idx, fr_gui) = obj.isInitialized; % Now initialized by reprojection
+                                            end
+                                            % If status was already isInitialized or isLabeled and reprojection is valid, keep it.
+                                        end
+                                    end
                                 end
                             end
-
-                            % Ensure triangulateLabeledPoints is called with the GUI frame index
-                            obj.triangulateLabeledPoints(fr_gui); 
-                            
-                            % Ensure reprojectPoints is called with the GUI frame index
-                            obj.reprojectPoints(fr_gui); 
-
-                            for i = 1:numel(originalPoints)
-                                jId = originalPoints(i).jointId;
-                                cId = originalPoints(i).camIdx;
-                                origCoords = originalPoints(i).coords;
-                                if ~any(isnan(origCoords))
-                                    obj.camPoints(jId, cId, :, fr_gui) = origCoords;
-                                end
-                            end
+                            obj.camPoints(:,:,:,fr_gui) = reshape(current_camPoints_frame, [obj.nMarkers, obj.nCams, 2]);
+                            % --- END MODIFICATION ---
                         else
                             warning('Label3D:Triangulate', 'Current GUI frame index obj.frame invalid.');
                         end
                     end
-                    update(obj)
+                    update(obj) % This will update DKAs from obj.camPoints and obj.points3D
                     if obj.autosave
                         obj.saveState()
                     end
@@ -2625,6 +2685,24 @@ classdef Label3D < Animator
 
     methods (Access = protected)
         function update(obj)
+            % --- BEGIN ADD GUARD ---
+            if isempty(obj.h) || ~iscell(obj.h) || isempty(obj.camPoints) || isempty(obj.points3D) || isempty(obj.kp3a) || ~isvalid(obj.kp3a)
+                % fprintf('Label3D.update: Essential properties (obj.h, obj.camPoints, obj.points3D, obj.kp3a) not fully initialized. Skipping update.\n');
+                return;
+            end
+            % Check if all expected DKAs are present and valid
+            if numel(obj.h) < 2*obj.nCams
+                % Not all animators (videos + DKAs) might be set up yet.
+                return;
+            end
+            for kpaCheckIdx = (obj.nCams + 1) : (2*obj.nCams)
+                if kpaCheckIdx > numel(obj.h) || ~isvalid(obj.h{kpaCheckIdx})
+                     % fprintf('Label3D.update: DKA %d not ready. Skipping update.\n', kpaCheckIdx - obj.nCams);
+                    return;
+                end
+            end
+            % --- END ADD GUARD ---
+
             % Update all of the other animators with any new data.
             for nKPAnimator = 1 : obj.nCams
                 kpaId = obj.nCams + nKPAnimator;

@@ -7,10 +7,10 @@ clc;
 
 % --- User Configuration ---
 % Path to the Label3D output .mat file you want to visualize
-label3d_output_mat_file = 'A:\\EnclosureProjects\\inprep\\freemat\\code\\calibration\\WMcalibration\\Label3D\\labeling_output\\20250520_224541_Label3D.mat'; % EXAMPLE, PLEASE CHANGE
+label3d_output_mat_file = 'A:\\EnclosureProjects\\inprep\\freemat\\code\\calibration\\WMcalibration\\Label3D\\labeling_output\\20250521_151216_Label3D.mat'; % EXAMPLE, PLEASE CHANGE
 
 % Output video file path and name
-output_video_file = 'A:\\EnclosureProjects\\inprep\\freemat\\code\\calibration\\WMcalibration\\Label3D\\labeling_output\\visualization_video.mp4'; % EXAMPLE, PLEASE CHANGE
+output_video_file = 'A:\\EnclosureProjects\\inprep\\freemat\\code\\calibration\\WMcalibration\\Label3D\\labeling_output\\visualization_video2.mp4'; % EXAMPLE, PLEASE CHANGE
 
 % --- Paths for dependent data (these should match your freemat_run_label3d.m setup for the session) ---
 % Directory containing the ORIGINAL video files (used for deriving calib paths if not using cropped)
@@ -34,7 +34,7 @@ enableVideoCacheForViz = true;   % Enable caching of loaded frames for this scri
 useParallelForViz = true;        % Use Parallel Computing Toolbox for loading frames if available
 
 % Video output settings
-output_fps = 30;
+output_fps = 3;
 output_quality = 75; % For MP4, typically 0-100, higher is better. For 'Motion JPEG AVI', 1-100 (75 is default good).
 
 % --- End User Configuration ---
@@ -61,6 +61,16 @@ session_cameraNames    = loaded_data.cameraNamesToSave;   % Cell array of camera
 session_nAnimals       = loaded_data.nAnimalsInSession;
 % session_imageSize      = loaded_data.imageSize; % nCams x 2 [H, W] - might be useful if videos frames are not full size
 labelingOutputDir_from_mat = fileparts(label3d_output_mat_file); % For cache location
+
+% --- ADDITION: Load camPoints from the .mat file ---
+if isfield(loaded_data, 'camPoints')
+    camPoints_from_mat = loaded_data.camPoints; % Should be (nMarkers, nCams, 2, nLabelSessionFrames)
+    fprintf('  Loaded camPoints_from_mat with size: %s\n', mat2str(size(camPoints_from_mat)));
+else
+    warning('Label3D:viz_l3d', 'camPoints field not found in .mat file. Cannot directly visualize saved 2D points.');
+    camPoints_from_mat = [];
+end
+% --- END ADDITION ---
 
 if isempty(framesToLabel_from_mat)
     error('No frames were labeled in the provided Label3D session file. Cannot generate video.');
@@ -461,6 +471,69 @@ viewGui = View3D(myCamParams_for_viz, videos_for_view3d, session_skeleton, view3
 % --- 8. Load Points and Generate Video ---
 fprintf('Loading 3D points into View3D...\n');
 viewGui.loadFrom3D(points3D_for_viewgui);
+
+% --- ADDITION: Directly set 2D keypoints in View3D from loaded camPoints_from_mat ---
+if ~isempty(camPoints_from_mat) && isvalid(viewGui) && numel(viewGui.h) >= (2 * num_session_cameras)
+    fprintf('Overriding View3D''s 2D keypoints with camPoints loaded from .mat file...\n');
+    
+    % Ensure camPoints_from_mat has 4 dimensions (nMarkers, nCams, 2, nSessionFrames)
+    % If nSessionFrames is 1, it might be (nMarkers, nCams, 2)
+    if ndims(camPoints_from_mat) == 3 && size(camPoints_from_mat,3) == 2 && nFramesToLoadForViz == 1
+        camPoints_from_mat = reshape(camPoints_from_mat, [size(camPoints_from_mat,1), size(camPoints_from_mat,2), 2, 1]);
+    elseif ndims(camPoints_from_mat) ~= 4
+        warning('Loaded camPoints_from_mat does not have 4 dimensions. Skipping override. Size: %s', mat2str(size(camPoints_from_mat)));
+        camPoints_from_mat = []; % Prevent further processing
+    end
+
+    if ~isempty(camPoints_from_mat) && size(camPoints_from_mat, 4) == nFramesToLoadForViz && size(camPoints_from_mat,1) == nMarkers_total_from_skeleton
+        for iCam = 1:num_session_cameras
+            dka_idx = num_session_cameras + iCam; % Index of DraggableKeypoint2DAnimator in viewGui.h
+            if numel(viewGui.h) >= dka_idx && isvalid(viewGui.h{dka_idx}) && isa(viewGui.h{dka_idx}, 'DraggableKeypoint2DAnimator')
+                % Extract 2D points for this camera from camPoints_from_mat
+                % camPoints_from_mat is (nMarkers, nCams, 2, nFramesToLoadForViz)
+                % DKA expects (nFramesToLoadForViz, 2, nMarkers)
+                
+                slice_2d_for_cam = squeeze(camPoints_from_mat(:, iCam, :, :)); % Becomes (nMarkers, 2, nFramesToLoadForViz)
+                
+                if nMarkers_total_from_skeleton == 0 && size(slice_2d_for_cam,1) > 0
+                     % If skeleton was empty but camPoints has markers, use that marker count
+                     temp_nMarkers = size(slice_2d_for_cam,1);
+                     fprintf('  Updating DKA for Cam %d using inferred %d markers from camPoints_from_mat.\n', iCam, temp_nMarkers);
+                     dka_markers_reshaped = permute(slice_2d_for_cam, [3, 2, 1]); % (nFrames, 2, nMarkers)
+                else
+                     dka_markers_reshaped = permute(slice_2d_for_cam, [3, 2, 1]); % (nFrames, 2, nMarkers)
+                end
+
+                if size(dka_markers_reshaped,1) == nFramesToLoadForViz && ...
+                   (size(dka_markers_reshaped,3) == nMarkers_total_from_skeleton || (nMarkers_total_from_skeleton==0 && size(dka_markers_reshaped,3)>0) )
+                    viewGui.h{dka_idx}.markers = dka_markers_reshaped;
+                    % The DKA's update method usually handles markersX, markersY and points.XData/YData
+                    % but we might need to manually trigger it if just setting .markers isn't enough.
+                    % Forcing an update of the visual points for the current frame:
+                    current_gui_frame = viewGui.frame;
+                    if current_gui_frame > 0 && current_gui_frame <= nFramesToLoadForViz
+                         viewGui.h{dka_idx}.points.XData(:) = squeeze(dka_markers_reshaped(current_gui_frame, 1, :));
+                         viewGui.h{dka_idx}.points.YData(:) = squeeze(dka_markers_reshaped(current_gui_frame, 2, :));
+                    end
+                else
+                    warning('  Dimension mismatch for Cam %d DKA markers. Expected (%d x 2 x %d), got (%d x %d x %d). Skipping DKA update.', ...
+                            iCam, nFramesToLoadForViz, nMarkers_total_from_skeleton, ...
+                            size(dka_markers_reshaped,1),size(dka_markers_reshaped,2),size(dka_markers_reshaped,3));
+                end
+            end
+        end
+        % viewGui.update(); % Call update on View3D to refresh all its animators - View3D does not have a public update method
+        if isvalid(viewGui) && viewGui.frame > 0 && viewGui.frame <= numel(viewGui.frameInds)
+            viewGui.setFrame(viewGui.frame); % Re-set the current frame to force redraw of DKA children
+        end
+        fprintf('  Finished overriding 2D keypoints.\n');
+    else
+        if ~isempty(camPoints_from_mat) % only print warning if it was loaded but conditions not met
+             warning('Label3D:viz_l3d', 'Could not override 2D keypoints. Conditions not met (camPoints_from_mat size, nFramesToLoadForViz, nMarkers_total_from_skeleton).');
+             fprintf('  camPoints_from_mat size: %s, nFramesToLoadForViz: %d, nMarkers_total_from_skeleton: %d\n', mat2str(size(camPoints_from_mat)), nFramesToLoadForViz, nMarkers_total_from_skeleton);
+        end
+    end
+end
 
 output_dir = fileparts(output_video_file);
 if ~exist(output_dir, 'dir')

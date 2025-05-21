@@ -26,11 +26,11 @@ poses_data = "A:\EnclosureProjects\inprep\freemat\data\experiments\good\240528\v
 % Define the camera names IN THE ORDER YOU WANT THEM LOADED/DISPLAYED
 % This order must match the order of param files loaded
 labelingCameraNames = {
-    "Cam_001",
+    % "Cam_001",
     "Cam_002",
     "Cam_003",
     
-    "Cam_004",
+    % "Cam_004",
     "Cam_007",
     % % "Cam_008",
     % "Cam_009",
@@ -55,10 +55,10 @@ labelingCameraNames = {
     };
 
 % --- Define which CAMERAS (from labelingCameraNames) to load poses for ---
-camerasToLoadPosesFor = {"Cam_001",
-    "Cam_002",
+camerasToLoadPosesFor = {"Cam_002",
+    % "Cam_002",
     "Cam_003",
-    "Cam_007", 
+    % "Cam_007", 
     % "Cam_010",
     % "Cam_011",
     % "Cam_013",
@@ -98,7 +98,7 @@ useParallel = true;          % Set to true if Parallel Computing Toolbox is avai
 
 % --- Debugging flags for frame selection ---
 debug_use_first_N_frames_from_poses = false; % If true and loadPrecomputedPoses, takes only the first N frames
-debug_N_frames_to_load = 10;                % Number of frames to load if debug_use_first_N_frames_from_poses is true
+debug_N_frames_to_load = 20;                % Number of frames to load if debug_use_first_N_frames_from_poses is true
 
 % =========================================================================
 % --- Precomputed 2D Pose Configuration ---
@@ -331,7 +331,7 @@ if loadPrecomputedPoses
                 end
             else
                 % --- Uniformly Sample 10 Frames Logic ---
-                num_frames_to_select = 10;
+                num_frames_to_select = debug_N_frames_to_load;
                 unique_processed_frames = unique(all_processed_frame_ids); % Ensure unique and sorted
                 
                 if numel(unique_processed_frames) == 0
