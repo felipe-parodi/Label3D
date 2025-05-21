@@ -275,8 +275,8 @@ def l3d_to_coco(l3d_mat_path, base_skeleton_mat_path, output_coco_path):
 
                 coco_keypoints_flat = []
                 num_labeled_kps_for_instance = 0
-                visible_xs = []
-                visible_ys = []
+                bbox_calc_xs = []
+                bbox_calc_ys = []
 
                 # Iterate up to num_base_keypoints for COCO output,
                 # using data from instance_kps_2d (which has keypoints_per_animal)
@@ -311,17 +311,16 @@ def l3d_to_coco(l3d_mat_path, base_skeleton_mat_path, output_coco_path):
                     coco_keypoints_flat.extend([x, y, v])
                     if v > 0: # COCO defines num_keypoints as number of kps with v>0
                         num_labeled_kps_for_instance += 1
-                    if v == 2: # For bbox, consider only visible and labeled points
-                        visible_xs.append(x)
-                        visible_ys.append(y)
+                        bbox_calc_xs.append(x)
+                        bbox_calc_ys.append(y)
 
                 if frame_s_idx < 2 and cam_idx < 2 and animal_inst_idx < 1: # Mirrored debug print condition
                     print(f"  Derived COCO keypoints_flat (first few elements): {coco_keypoints_flat[:num_base_keypoints*3*2]}...")
                     print(f"  Derived num_labeled_kps_for_instance: {num_labeled_kps_for_instance}")
-                    if not visible_xs:
-                        print("  No visible_xs for bbox calculation for this instance.")
+                    if not bbox_calc_xs:
+                        print("  No in-frame keypoints (v>0) for bbox calculation for this instance.")
                     else:
-                        print(f"  visible_xs count: {len(visible_xs)}")
+                        print(f"  bbox_calc_xs count (keypoints with v>0): {len(bbox_calc_xs)}")
 
 
                 if num_labeled_kps_for_instance == 0: # If no keypoints are v=1 or v=2
@@ -331,9 +330,9 @@ def l3d_to_coco(l3d_mat_path, base_skeleton_mat_path, output_coco_path):
 
                 annotation_id_counter += 1
                 
-                if visible_xs:
-                    min_x_f, max_x_f = float(min(visible_xs)), float(max(visible_xs))
-                    min_y_f, max_y_f = float(min(visible_ys)), float(max(visible_ys))
+                if bbox_calc_xs:
+                    min_x_f, max_x_f = float(min(bbox_calc_xs)), float(max(bbox_calc_xs))
+                    min_y_f, max_y_f = float(min(bbox_calc_ys)), float(max(bbox_calc_ys))
                     
                     # Cap bounding box coordinates to image dimensions
                     min_x_f_clipped = max(0.0, min_x_f)
@@ -344,7 +343,7 @@ def l3d_to_coco(l3d_mat_path, base_skeleton_mat_path, output_coco_path):
                     bbox_w_f = max(0.0, max_x_f_clipped - min_x_f_clipped)
                     bbox_h_f = max(0.0, max_y_f_clipped - min_y_f_clipped)
                     bbox_float = [min_x_f_clipped, min_y_f_clipped, bbox_w_f, bbox_h_f]
-                else: # If num_labeled_kps_for_instance > 0 but all are v=1 (occluded)
+                else: # If num_labeled_kps_for_instance > 0 but bbox_calc_xs is empty (should be rare/impossible)
                     bbox_float = [0.0, 0.0, 0.0, 0.0] 
                 
                 bbox_coco = [int(round(c)) for c in bbox_float]
@@ -370,13 +369,13 @@ def l3d_to_coco(l3d_mat_path, base_skeleton_mat_path, output_coco_path):
 
 if __name__ == '__main__':
     # l3d_mat_file = "path/to/your/Label3D_output.mat" 
-    l3d_mat_file = r"A:\EnclosureProjects\inprep\freemat\code\calibration\WMcalibration\Label3D\labeling_output\20250513_184344_Label3D.mat"
+    l3d_mat_file = r"A:\EnclosureProjects\inprep\freemat\code\calibration\WMcalibration\Label3D\labeling_output\20250514_083925_Label3D.mat"
     
     # Path to your base skeleton .mat file (e.g., coco17_skeleton.mat)
     base_skel_file = r"A:\EnclosureProjects\inprep\freemat\code\calibration\WMcalibration\Label3D\skeletons\coco17_skeleton.mat" 
     
     # Desired output path for the COCO JSON file
-    coco_json_output_file = r"A:\EnclosureProjects\inprep\freemat\code\calibration\WMcalibration\Label3D\labeling_output\output_coco.json"
+    coco_json_output_file = r"A:\EnclosureProjects\inprep\freemat\code\calibration\WMcalibration\Label3D\labeling_output\output_coco_250515.json"
 
     # --- Check if paths exist before running ---
     if not os.path.exists(l3d_mat_file):
